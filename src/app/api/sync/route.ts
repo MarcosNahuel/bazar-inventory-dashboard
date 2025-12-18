@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
     if (syncType === 'full' || syncType === 'orders') {
       console.log('Syncing orders...');
 
-      const orders = await ml.getAllOrders(30, 500);
+      const orders = await ml.getAllOrders(30);
 
       for (const order of orders) {
         itemsProcessed++;
