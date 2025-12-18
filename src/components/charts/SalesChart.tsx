@@ -53,15 +53,15 @@ export function ChannelDistributionChart({ data }: ChannelChartProps) {
             outerRadius={80}
             paddingAngle={5}
             dataKey="value"
-            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+            label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
           >
             {chartData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={entry.color} />
             ))}
           </Pie>
           <Tooltip
-            formatter={(value: number) => [
-              `${value} ventas (${((value / total) * 100).toFixed(1)}%)`,
+            formatter={(value) => [
+              `${value} ventas (${((Number(value) / total) * 100).toFixed(1)}%)`,
               ''
             ]}
           />
@@ -131,8 +131,8 @@ export function TopProductsChart({ products }: TopProductsProps) {
           <XAxis type="number" />
           <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 11 }} />
           <Tooltip
-            formatter={(value: number, name: string) => [
-              name === 'ingresos' ? `$${value.toLocaleString()}` : value,
+            formatter={(value, name) => [
+              name === 'ingresos' ? `$${Number(value).toLocaleString()}` : value,
               name === 'ingresos' ? 'Ingresos' : 'Ventas'
             ]}
           />
@@ -145,11 +145,14 @@ export function TopProductsChart({ products }: TopProductsProps) {
 }
 
 interface ProfitabilityData {
-  producto: string;
-  costo: number;
-  precio: number;
-  margen: number;
-  roi: number;
+  titulo?: string;
+  producto?: string;
+  rentabilidad?: number;
+  utilidad?: number;
+  margen?: number;
+  roi?: number;
+  costo?: number;
+  precio?: number;
 }
 
 interface ProfitabilityChartProps {
@@ -157,11 +160,14 @@ interface ProfitabilityChartProps {
 }
 
 export function ProfitabilityChart({ data }: ProfitabilityChartProps) {
-  const chartData = data.slice(0, 10).map(p => ({
-    name: p.producto.length > 15 ? p.producto.substring(0, 15) + '...' : p.producto,
-    margen: p.margen,
-    roi: p.roi,
-  }));
+  const chartData = data.slice(0, 10).map(p => {
+    const name = p.titulo || p.producto || '';
+    return {
+      name: name.length > 15 ? name.substring(0, 15) + '...' : name,
+      margen: p.utilidad ?? p.margen ?? 0,
+      roi: p.rentabilidad ?? p.roi ?? 0,
+    };
+  });
 
   return (
     <div className="h-64">
@@ -172,8 +178,8 @@ export function ProfitabilityChart({ data }: ProfitabilityChartProps) {
           <YAxis yAxisId="left" orientation="left" stroke="#10B981" />
           <YAxis yAxisId="right" orientation="right" stroke="#3B82F6" />
           <Tooltip
-            formatter={(value: number, name: string) => [
-              name === 'margen' ? `$${value.toLocaleString()}` : `${value.toFixed(1)}%`,
+            formatter={(value, name) => [
+              name === 'margen' ? `$${Number(value).toLocaleString()}` : `${Number(value).toFixed(1)}%`,
               name === 'margen' ? 'Margen' : 'ROI'
             ]}
           />
