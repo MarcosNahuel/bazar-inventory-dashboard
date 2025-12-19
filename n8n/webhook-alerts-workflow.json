@@ -1,0 +1,131 @@
+{
+  "name": "BAZAR - Alertas Stock (Webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bazar-alertas",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Alertas",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "bazar-alertas-stock"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.total_alerts }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-alerts",
+      "name": "Hay Alertas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "content": "={{ $json.summary }}",
+        "options": {}
+      },
+      "id": "send-telegram",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [440, -100],
+      "credentials": {
+        "telegramApi": {
+          "id": "CONFIGURAR",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "phoneNumberId": "={{$credentials.phoneNumberId}}",
+        "recipientPhoneNumber": "NUMERO_DESTINO",
+        "textBody": "={{ $json.summary }}"
+      },
+      "id": "send-whatsapp",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [440, 100],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "CONFIGURAR",
+          "name": "WhatsApp Business"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log",
+              "name": "log",
+              "value": "=Sin alertas pendientes - {{ $json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "no-alerts",
+      "name": "Sin Alertas",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Alertas": {
+      "main": [
+        [
+          {
+            "node": "Hay Alertas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay Alertas?": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin Alertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

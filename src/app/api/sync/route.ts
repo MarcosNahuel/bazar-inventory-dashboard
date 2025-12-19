@@ -260,6 +260,23 @@ export async function POST(request: NextRequest) {
       .update({ value: JSON.stringify(new Date().toISOString()) })
       .eq('key', 'last_full_sync');
 
+    // Enviar alertas al webhook de n8n si está configurado
+    const webhookUrl = process.env.N8N_WEBHOOK_URL;
+    let webhookSent = false;
+    if (webhookUrl) {
+      try {
+        const baseUrl = request.nextUrl.origin;
+        const notifyResponse = await fetch(`${baseUrl}/api/webhook/notify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ webhook_url: webhookUrl }),
+        });
+        webhookSent = notifyResponse.ok;
+      } catch (webhookError) {
+        console.error('Error sending webhook:', webhookError);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       sync_type: syncType,
@@ -269,6 +286,7 @@ export async function POST(request: NextRequest) {
       items_failed: itemsFailed,
       duration_ms: duration,
       completed_at: new Date().toISOString(),
+      webhook_sent: webhookSent,
     });
   } catch (error) {
     console.error('Sync error:', error);
