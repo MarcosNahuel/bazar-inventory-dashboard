@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual de Usuario - BAZAR Importaciones Dashboard</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #f59e0b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --gray: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.7;
+            color: var(--dark);
+            background: var(--light);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        /* Cover Page */
+        .cover {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 80px 40px;
+            text-align: center;
+            margin: -40px -20px 40px;
+            border-radius: 0 0 30px 30px;
+        }
+
+        .cover h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .cover .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+
+        .cover .meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .cover .logo {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        /* Section Headers */
+        h2 {
+            color: var(--primary);
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin: 50px 0 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid var(--primary);
+        }
+
+        h3 {
+            color: var(--dark);
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin: 30px 0 15px;
+        }
+
+        h4 {
+            color: var(--gray);
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 20px 0 10px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: #475569;
+        }
+
+        /* Screenshots */
+        .screenshot {
+            margin: 25px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+        }
+
+        .screenshot img {
+            width: 100%;
+            display: block;
+        }
+
+        .screenshot-caption {
+            background: var(--dark);
+            color: white;
+            padding: 12px 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: var(--primary);
+            color: white;
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        tr:nth-child(even) {
+            background: #f1f5f9;
+        }
+
+        /* Lists */
+        ul, ol {
+            margin: 15px 0 15px 25px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            color: #475569;
+        }
+
+        /* Info Boxes */
+        .info-box {
+            background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 12px 12px 0;
+        }
+
+        .info-box.warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%);
+            border-left-color: var(--warning);
+        }
+
+        .info-box.success {
+            background: linear-gradient(135deg, #d1fae5 0%, #ecfdf5 100%);
+            border-left-color: var(--success);
+        }
+
+        .info-box h4 {
+            margin-top: 0;
+            color: var(--dark);
+        }
+
+        /* Code blocks */
+        code {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85em;
+        }
+
+        pre {
+            background: var(--dark);
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-critical { background: #fee2e2; color: #dc2626; }
+        .badge-warning { background: #fef3c7; color: #d97706; }
+        .badge-success { background: #d1fae5; color: #059669; }
+        .badge-info { background: #dbeafe; color: #2563eb; }
+
+        /* Page Break for PDF */
+        .page-break {
+            page-break-after: always;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 60px;
+            padding: 30px;
+            background: var(--dark);
+            color: white;
+            text-align: center;
+            border-radius: 12px;
+        }
+
+        .footer a {
+            color: var(--secondary);
+            text-decoration: none;
+        }
+
+        /* TOC */
+        .toc {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            margin-bottom: 40px;
+        }
+
+        .toc h3 {
+            margin-top: 0;
+            color: var(--primary);
+        }
+
+        .toc ol {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .toc li {
+            padding: 10px 0;
+            border-bottom: 1px dashed #e2e8f0;
+        }
+
+        .toc a {
+            color: var(--dark);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .toc a:hover {
+            color: var(--primary);
+        }
+
+        /* Print styles */
+        @media print {
+            .cover {
+                margin: 0;
+                border-radius: 0;
+            }
+
+            .container {
+                padding: 20px;
+            }
+
+            .screenshot {
+                box-shadow: none;
+                border: 1px solid #e2e8f0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Cover Page -->
+        <div class="cover">
+            <div class="logo">📊</div>
+            <h1>BAZAR Importaciones</h1>
+            <p class="subtitle">Manual de Usuario - Dashboard de Gestión</p>
+            <div class="meta">
+                <span>📅 Versión 1.0 - Diciembre 2025</span>
+                <span>🇨🇱 Mercado Libre Chile</span>
+            </div>
+        </div>
+
+        <!-- Table of Contents -->
+        <div class="toc">
+            <h3>📑 Contenido</h3>
+            <ol>
+                <li><a href="#introduccion">Introducción</a></li>
+                <li><a href="#resumen">Panel de Resumen (Overview)</a></li>
+                <li><a href="#inventario">Estado del Inventario</a></li>
+                <li><a href="#pareto">Análisis Pareto 80/20</a></li>
+                <li><a href="#costos">Gestión de Costos y Márgenes</a></li>
+                <li><a href="#alertas">Centro de Alertas</a></li>
+                <li><a href="#proyecciones">Proyecciones ML (Machine Learning)</a></li>
+                <li><a href="#proximamente">Módulos Próximamente</a></li>
+                <li><a href="#arquitectura">Arquitectura Técnica</a></li>
+                <li><a href="#faq">Preguntas Frecuentes</a></li>
+            </ol>
+        </div>
+
+        <!-- Introduction -->
+        <h2 id="introduccion">Introducción</h2>
+        <p>Bienvenido al Dashboard de <strong>BAZAR Importaciones</strong>, tu centro de comando para gestionar el inventario y analizar el rendimiento de tu tienda en Mercado Libre Chile.</p>
+
+        <div class="info-box success">
+            <h4>🎯 Este sistema te permite:</h4>
+            <ul>
+                <li>Monitorear el estado de tu inventario en tiempo real</li>
+                <li>Identificar productos con stock crítico</li>
+                <li>Analizar qué productos generan el 80% de tus ventas</li>
+                <li>Proyectar ventas futuras con Machine Learning</li>
+                <li>Recibir alertas automáticas de reposición</li>
+            </ul>
+        </div>
+
+        <!-- Section 1: Resumen -->
+        <h2 id="resumen">1. Panel de Resumen (Overview)</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/01-resumen.png" alt="Panel de Resumen">
+            <div class="screenshot-caption">📊 Vista general del dashboard con KPIs principales</div>
+        </div>
+
+        <h3>¿Qué estoy viendo?</h3>
+        <p>El panel de resumen es tu vista rápida del estado general del negocio.</p>
+
+        <h4>KPIs Principales</h4>
+        <table>
+            <tr>
+                <th>Métrica</th>
+                <th>Descripción</th>
+                <th>Fuente de Datos</th>
+            </tr>
+            <tr>
+                <td><strong>Productos Activos</strong></td>
+                <td>Cantidad de publicaciones activas en ML</td>
+                <td><code>/users/{id}/items/search</code></td>
+            </tr>
+            <tr>
+                <td><strong>Ingresos (30 días)</strong></td>
+                <td>Ventas totales del último mes</td>
+                <td><code>/orders/search</code></td>
+            </tr>
+            <tr>
+                <td><strong>Ticket Promedio</strong></td>
+                <td>Valor promedio por orden</td>
+                <td>Cálculo: Ingresos ÷ Órdenes</td>
+            </tr>
+            <tr>
+                <td><strong>Órdenes</strong></td>
+                <td>Total de pedidos procesados</td>
+                <td><code>/orders/search</code></td>
+            </tr>
+        </table>
+
+        <!-- Section 2: Inventario -->
+        <h2 id="inventario">2. Estado del Inventario</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/02-inventario.png" alt="Estado del Inventario">
+            <div class="screenshot-caption">📦 Salud del inventario categorizada por niveles de stock</div>
+        </div>
+
+        <h3>Semáforo de Stock</h3>
+        <table>
+            <tr>
+                <th>Estado</th>
+                <th>Rango</th>
+                <th>Acción Recomendada</th>
+            </tr>
+            <tr>
+                <td><span class="badge badge-critical">Crítico</span></td>
+                <td>0-1 unidades</td>
+                <td>Reponer inmediatamente</td>
+            </tr>
+            <tr>
+                <td><span class="badge badge-warning">Alerta</span></td>
+                <td>2-5 unidades</td>
+                <td>Programar reposición</td>
+            </tr>
+            <tr>
+                <td><span class="badge badge-info">Bajo</span></td>
+                <td>6-10 unidades</td>
+                <td>Monitorear ventas</td>
+            </tr>
+            <tr>
+                <td><span class="badge badge-success">OK</span></td>
+                <td>11-20 unidades</td>
+                <td>Sin acción</td>
+            </tr>
+            <tr>
+                <td><span class="badge badge-success">Alto</span></td>
+                <td>21+ unidades</td>
+                <td>Evaluar rotación</td>
+            </tr>
+        </table>
+
+        <!-- Section 3: Pareto -->
+        <h2 id="pareto">3. Análisis Pareto 80/20</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/03-pareto.png" alt="Análisis Pareto">
+            <div class="screenshot-caption">📈 Identificación del 20% de productos que generan el 80% de ingresos</div>
+        </div>
+
+        <h3>¿Qué estoy viendo?</h3>
+        <p>El principio de Pareto aplicado a tu negocio: identificar el 20% de productos que generan el 80% de tus ingresos.</p>
+
+        <div class="info-box">
+            <h4>💡 Insight Clave</h4>
+            <p>El porcentaje mostrado en grande (ej. <strong>83.3%</strong>) indica qué proporción de tus ventas proviene de tu TOP 20% de productos.</p>
+        </div>
+
+        <!-- Section 4: Costos -->
+        <h2 id="costos">4. Gestión de Costos y Márgenes</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/04-costos.png" alt="Gestión de Costos">
+            <div class="screenshot-caption">💰 Análisis de rentabilidad y márgenes por producto</div>
+        </div>
+
+        <h3>Carga de Costos en Lote</h3>
+        <p>Puedes subir un archivo Excel (.xlsx) o CSV con la siguiente estructura:</p>
+
+        <table>
+            <tr>
+                <th>Columna</th>
+                <th>Requerida</th>
+                <th>Descripción</th>
+            </tr>
+            <tr>
+                <td><strong>SKU</strong></td>
+                <td>✅ Sí</td>
+                <td>Código interno del producto</td>
+            </tr>
+            <tr>
+                <td><strong>Codigo_ML</strong></td>
+                <td>✅ Sí</td>
+                <td>ID de Mercado Libre (MLC...)</td>
+            </tr>
+            <tr>
+                <td><strong>Costo</strong></td>
+                <td>✅ Sí</td>
+                <td>Costo unitario en CLP</td>
+            </tr>
+            <tr>
+                <td><strong>Proveedor</strong></td>
+                <td>❌ No</td>
+                <td>Nombre del proveedor</td>
+            </tr>
+        </table>
+
+        <!-- Section 5: Alertas -->
+        <h2 id="alertas">5. Centro de Alertas</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/05-alertas.png" alt="Centro de Alertas">
+            <div class="screenshot-caption">🚨 Lista priorizada de productos con stock crítico</div>
+        </div>
+
+        <h3>Resumen de Alertas</h3>
+        <ul>
+            <li><strong>Urgentes:</strong> Productos con 1 unidad o menos (requieren acción HOY)</li>
+            <li><strong>Alerta:</strong> Productos con 2-5 unidades</li>
+            <li><strong>Bajo:</strong> Productos con 6-10 unidades</li>
+        </ul>
+
+        <div class="info-box warning">
+            <h4>📧 Funcionalidad "Enviar Alertas"</h4>
+            <p>El botón <strong>Enviar Alertas</strong> genera un email automático con la lista de productos críticos y sugerencias de reposición.</p>
+        </div>
+
+        <!-- Section 6: Proyecciones -->
+        <h2 id="proyecciones">6. Proyecciones ML (Machine Learning)</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/06-proyecciones.png" alt="Proyecciones ML">
+            <div class="screenshot-caption">🤖 Análisis predictivo con regresión lineal y estacionalidad semanal</div>
+        </div>
+
+        <h3>Métricas del Modelo</h3>
+        <table>
+            <tr>
+                <th>Métrica</th>
+                <th>Descripción</th>
+            </tr>
+            <tr>
+                <td><strong>Días Históricos</strong></td>
+                <td>Período analizado (ej. 365 días)</td>
+            </tr>
+            <tr>
+                <td><strong>Revenue Histórico</strong></td>
+                <td>Ventas totales del período</td>
+            </tr>
+            <tr>
+                <td><strong>Proyección 30 días</strong></td>
+                <td>Estimación de ventas próximo mes</td>
+            </tr>
+            <tr>
+                <td><strong>R² Regresión</strong></td>
+                <td>Calidad del modelo (0-100%)</td>
+            </tr>
+        </table>
+
+        <h3>Ciclo Semanal (Estacionalidad)</h3>
+        <p>Muestra qué días de la semana venden más:</p>
+        <ul>
+            <li><strong>↑ Alto (>110%):</strong> Días con ventas sobre el promedio</li>
+            <li><strong>Normal (90-110%):</strong> Días típicos</li>
+            <li><strong>↓ Bajo (<90%):</strong> Días con menor actividad</li>
+        </ul>
+
+        <!-- Section 7: Próximamente -->
+        <h2 id="proximamente">7. Módulos Próximamente</h2>
+
+        <div class="screenshot">
+            <img src="screenshots/07-proximamente.png" alt="Módulos Próximamente">
+            <div class="screenshot-caption">🚀 Roadmap de funcionalidades en desarrollo</div>
+        </div>
+
+        <table>
+            <tr>
+                <th>Módulo</th>
+                <th>Estado</th>
+                <th>ETA</th>
+            </tr>
+            <tr>
+                <td><strong>Preventa Automatizada</strong></td>
+                <td><span class="badge badge-info">En desarrollo</span></td>
+                <td>Q1 2025</td>
+            </tr>
+            <tr>
+                <td><strong>Postventa Inteligente</strong></td>
+                <td><span class="badge badge-warning">Planificado</span></td>
+                <td>Q2 2025</td>
+            </tr>
+            <tr>
+                <td><strong>Panel de Soporte</strong></td>
+                <td><span class="badge badge-warning">Planificado</span></td>
+                <td>Q2 2025</td>
+            </tr>
+            <tr>
+                <td><strong>Chatbot MarIA</strong></td>
+                <td><span class="badge badge-info">En desarrollo</span></td>
+                <td>Q1 2025</td>
+            </tr>
+        </table>
+
+        <!-- Arquitectura -->
+        <h2 id="arquitectura">Arquitectura Técnica</h2>
+
+        <h3>Flujo de Datos</h3>
+        <pre><code>┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Mercado Libre  │────▶│   Next.js API   │────▶│    Dashboard    │
+│      API        │     │    (Backend)    │     │   (Frontend)    │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       │
+        │                       ▼
+        │               ┌─────────────────┐
+        └──────────────▶│     Cache       │
+                        │   (1 hora TTL)  │
+                        └─────────────────┘</code></pre>
+
+        <h3>Sistema de Caché</h3>
+        <ul>
+            <li><strong>Cache TTL:</strong> 1 hora para datos de inventario</li>
+            <li><strong>Cache de Proyecciones:</strong> Datos ML se cachean para evitar recálculos</li>
+            <li><strong>Actualización Manual:</strong> Botón "Actualizar" fuerza refresh</li>
+        </ul>
+
+        <!-- FAQ -->
+        <h2 id="faq">Preguntas Frecuentes</h2>
+
+        <div class="info-box">
+            <h4>¿Por qué las proyecciones tardan en cargar?</h4>
+            <p>La primera carga del día consulta 365 días de órdenes. Puede tomar hasta 80 segundos. Las siguientes consultas usan caché y cargan en menos de 1 segundo.</p>
+        </div>
+
+        <div class="info-box">
+            <h4>¿Cada cuánto se actualizan los datos?</h4>
+            <ul>
+                <li><strong>Automáticamente:</strong> El caché se invalida cada 1 hora</li>
+                <li><strong>Manualmente:</strong> Usa el botón "Actualizar" para forzar refresh</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <h4>¿Qué significa R² en las proyecciones?</h4>
+            <p>R² mide qué tan bien el modelo explica la variabilidad:</p>
+            <ul>
+                <li><strong>0-20%:</strong> Modelo débil, alta incertidumbre</li>
+                <li><strong>20-50%:</strong> Modelo moderado</li>
+                <li><strong>50-80%:</strong> Buen modelo</li>
+                <li><strong>80-100%:</strong> Excelente ajuste</li>
+            </ul>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p><strong>BAZAR Importaciones</strong> - Dashboard v1.0</p>
+            <p>📧 <a href="mailto:bazaroimportaciones@gmail.com">bazaroimportaciones@gmail.com</a></p>
+            <p style="margin-top: 15px; opacity: 0.7; font-size: 0.85rem;">© 2025 - Documento generado automáticamente</p>
+        </div>
+    </div>
+</body>
+</html>
