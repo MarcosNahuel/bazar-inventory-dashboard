@@ -953,7 +953,6 @@ export default function Dashboard() {
                 description="Respuestas automáticas a preguntas de productos con IA. Aumenta tu tasa de conversión respondiendo 24/7."
                 icon={MessageSquare}
                 status="En desarrollo"
-                eta="Q1 2025"
                 features={[
                   "Respuestas instantáneas a preguntas frecuentes",
                   "Integración con ChatGPT/Claude",
@@ -966,7 +965,6 @@ export default function Dashboard() {
                 description="Gestión automatizada de tracking, facturas, garantías y devoluciones. Mejora la experiencia del cliente."
                 icon={Package}
                 status="Planificado"
-                eta="Q2 2025"
                 features={[
                   "Notificaciones automáticas de envío",
                   "Generación de facturas",
@@ -979,7 +977,6 @@ export default function Dashboard() {
                 description="Centro de escalaciones para atención humana con contexto enriquecido del cliente y su historial."
                 icon={Headphones}
                 status="Planificado"
-                eta="Q2 2025"
                 features={[
                   "Historial completo del cliente",
                   "Tickets priorizados por urgencia",
@@ -992,7 +989,6 @@ export default function Dashboard() {
                 description="Agente conversacional inteligente para atención 24/7. Ya integrado con n8n, próximamente en el dashboard."
                 icon={Bot}
                 status="En desarrollo"
-                eta="Q1 2025"
                 features={[
                   "Respuestas naturales con IA",
                   "Integración con WhatsApp/Messenger",
@@ -1077,12 +1073,11 @@ function HealthCard({ title, value, color }: {
   );
 }
 
-function ComingSoonCard({ title, description, icon: Icon, status, eta, features }: {
+function ComingSoonCard({ title, description, icon: Icon, status, features }: {
   title: string;
   description: string;
   icon: React.ElementType;
   status: string;
-  eta: string;
   features: string[];
 }) {
   const statusColors = {
@@ -1099,14 +1094,9 @@ function ComingSoonCard({ title, description, icon: Icon, status, eta, features 
           <div className={`p-3 rounded-xl bg-purple-100`}>
             <Icon className="w-6 h-6 text-purple-600" />
           </div>
-          <div className="flex gap-2">
-            <span className={`px-2 py-1 text-xs rounded-full ${statusColors[status as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
-              {status}
-            </span>
-            <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
-              {eta}
-            </span>
-          </div>
+          <span className={`px-2 py-1 text-xs rounded-full ${statusColors[status as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+            {status}
+          </span>
         </div>
 
         <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
