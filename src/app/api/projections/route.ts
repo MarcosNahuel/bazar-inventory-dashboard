@@ -2,7 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
+
+// Cache para evitar múltiples llamadas a la API de ML
+interface CacheEntry {
+  data: DailyData[];
+  timestamp: number;
+  daysBack: number;
+}
+
+let projectionsCache: CacheEntry | null = null;
+const CACHE_TTL = 60 * 60 * 1000; // 1 hora en ms
 
 interface DailyData {
   date: string;
@@ -25,8 +35,28 @@ interface ProjectedDay {
   is_projection: boolean;
 }
 
-// Get all orders and aggregate by day
+// Check if cache is valid
+function isCacheValid(daysBack: number): boolean {
+  if (!projectionsCache) return false;
+  const now = Date.now();
+  const isExpired = now - projectionsCache.timestamp > CACHE_TTL;
+  const isSamePeriod = projectionsCache.daysBack >= daysBack;
+  return !isExpired && isSamePeriod;
+}
+
+// Get all orders and aggregate by day (with cache)
 async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number) {
+  // Usar caché si está disponible y válido
+  if (isCacheValid(daysBack) && projectionsCache) {
+    console.log('📦 Usando datos en caché para proyecciones');
+    // Si el cache tiene más días, recortamos
+    if (projectionsCache.daysBack > daysBack) {
+      return projectionsCache.data.slice(-daysBack);
+    }
+    return projectionsCache.data;
+  }
+
+  console.log('🔄 Obteniendo datos frescos de ML API...');
   const orders = await ml.getAllOrders(daysBack);
 
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -66,7 +96,17 @@ async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, days
   }
 
   // Convert to array sorted by date
-  return Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date));
+  const result = Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Guardar en caché
+  projectionsCache = {
+    data: result,
+    timestamp: Date.now(),
+    daysBack: daysBack
+  };
+  console.log(`✅ Datos guardados en caché (${result.length} días)`);
+
+  return result;
 }
 
 // Linear regression
@@ -286,7 +326,15 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const historicalDays = parseInt(searchParams.get('historical') || '60');
     const forecastDays = parseInt(searchParams.get('forecast') || '30');
+    const forceRefresh = searchParams.get('refresh') === 'true';
 
+    // Forzar refresh si se solicita
+    if (forceRefresh) {
+      projectionsCache = null;
+      console.log('🗑️ Caché limpiado por solicitud');
+    }
+
+    const usingCache = isCacheValid(historicalDays);
     const ml = getMercadoLibreClient();
 
     // Get daily series for the historical period (up to 365 days for full year view)
@@ -395,7 +443,9 @@ export async function GET(request: NextRequest) {
         total_projected_revenue: projectedRevenue,
         avg_daily_revenue: Math.round(historicalRevenue / Math.max(daysWithData.length, 1)),
         model: 'Linear Regression + Weekly Seasonality',
-        generated_at: new Date().toISOString()
+        generated_at: new Date().toISOString(),
+        from_cache: usingCache,
+        cache_expires_at: projectionsCache ? new Date(projectionsCache.timestamp + CACHE_TTL).toISOString() : null
       }
     };
 
