@@ -686,7 +686,7 @@ export default function Dashboard() {
                 />
                 <RoadmapItem
                   quarter="Q3 2025"
-                  items={["App Móvil", "Multi-marketplace", "Análisis de competencia"]}
+                  items={["Multi-marketplace", "Análisis de competencia", "Integraciones avanzadas"]}
                   status="future"
                 />
               </div>
