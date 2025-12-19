@@ -12,6 +12,7 @@ interface CacheEntry {
 }
 
 let projectionsCache: CacheEntry | null = null;
+let fetchInProgress: Promise<DailyData[]> | null = null;
 const CACHE_TTL = 60 * 60 * 1000; // 1 hora en ms
 
 interface DailyData {
@@ -44,8 +45,8 @@ function isCacheValid(daysBack: number): boolean {
   return !isExpired && isSamePeriod;
 }
 
-// Get all orders and aggregate by day (with cache)
-async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number) {
+// Get all orders and aggregate by day (with cache and lock)
+async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number): Promise<DailyData[]> {
   // Usar caché si está disponible y válido
   if (isCacheValid(daysBack) && projectionsCache) {
     console.log('📦 Usando datos en caché para proyecciones');
@@ -56,9 +57,30 @@ async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, days
     return projectionsCache.data;
   }
 
-  console.log('🔄 Obteniendo datos frescos de ML API...');
-  const orders = await ml.getAllOrders(daysBack);
+  // Si ya hay un fetch en progreso, esperar a que termine
+  if (fetchInProgress) {
+    console.log('⏳ Esperando fetch en progreso...');
+    return fetchInProgress;
+  }
 
+  // Iniciar fetch con lock
+  console.log('🔄 Obteniendo datos frescos de ML API...');
+  fetchInProgress = (async () => {
+    const orders = await ml.getAllOrders(daysBack);
+    return processOrders(orders, daysBack);
+  })();
+
+  try {
+    const result = await fetchInProgress;
+    return result;
+  } finally {
+    fetchInProgress = null;
+  }
+}
+
+// Procesar órdenes en datos diarios
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function processOrders(orders: any[], daysBack: number): DailyData[] {
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const dailyData: Record<string, DailyData> = {};
 
