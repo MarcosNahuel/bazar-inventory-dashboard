@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import {
   Package, AlertTriangle, TrendingUp, DollarSign, ShoppingCart,
   RefreshCw, ExternalLink, BarChart3, PieChart, Users, Mail,
-  Upload, FileSpreadsheet, Activity, Target, Boxes
+  Upload, FileSpreadsheet, Activity, Target, Boxes, Rocket,
+  MessageSquare, Headphones, Bot, Clock
 } from 'lucide-react';
 import { StockStatusIndicator } from '@/components/ui/TrafficLight';
 import {
@@ -86,7 +87,7 @@ interface InventoryData {
   };
 }
 
-type TabType = 'overview' | 'inventory' | 'pareto' | 'costs' | 'alerts';
+type TabType = 'overview' | 'inventory' | 'pareto' | 'costs' | 'alerts' | 'coming-soon';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -165,6 +166,7 @@ export default function Dashboard() {
     { id: 'pareto', label: 'Pareto 80/20', icon: Target },
     { id: 'costs', label: 'Costos', icon: FileSpreadsheet },
     { id: 'alerts', label: 'Alertas', icon: AlertTriangle },
+    { id: 'coming-soon', label: 'Próximamente', icon: Rocket },
   ];
 
   return (
@@ -595,6 +597,115 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Coming Soon Tab */}
+        {activeTab === 'coming-soon' && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-indigo-700 rounded-xl p-6 text-white">
+              <div className="flex items-center gap-3 mb-2">
+                <Rocket className="w-8 h-8" />
+                <h2 className="text-2xl font-bold">Módulos en Desarrollo</h2>
+              </div>
+              <p className="text-purple-100">
+                Estamos trabajando en nuevas funcionalidades para potenciar tu negocio en Mercado Libre.
+              </p>
+            </div>
+
+            {/* Coming Soon Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <ComingSoonCard
+                title="Preventa Automatizada"
+                description="Respuestas automáticas a preguntas de productos con IA. Aumenta tu tasa de conversión respondiendo 24/7."
+                icon={MessageSquare}
+                status="En desarrollo"
+                eta="Q1 2025"
+                features={[
+                  "Respuestas instantáneas a preguntas frecuentes",
+                  "Integración con ChatGPT/Claude",
+                  "Templates personalizables",
+                  "Métricas de conversión"
+                ]}
+              />
+              <ComingSoonCard
+                title="Postventa Inteligente"
+                description="Gestión automatizada de tracking, facturas, garantías y devoluciones. Mejora la experiencia del cliente."
+                icon={Package}
+                status="Planificado"
+                eta="Q2 2025"
+                features={[
+                  "Notificaciones automáticas de envío",
+                  "Generación de facturas",
+                  "Gestión de garantías",
+                  "Proceso de devoluciones simplificado"
+                ]}
+              />
+              <ComingSoonCard
+                title="Panel de Soporte"
+                description="Centro de escalaciones para atención humana con contexto enriquecido del cliente y su historial."
+                icon={Headphones}
+                status="Planificado"
+                eta="Q2 2025"
+                features={[
+                  "Historial completo del cliente",
+                  "Tickets priorizados por urgencia",
+                  "Integración con WhatsApp",
+                  "Dashboard de métricas de soporte"
+                ]}
+              />
+              <ComingSoonCard
+                title="Chatbot IA (MarIA)"
+                description="Agente conversacional inteligente para atención 24/7. Ya integrado con n8n, próximamente en el dashboard."
+                icon={Bot}
+                status="En desarrollo"
+                eta="Q1 2025"
+                features={[
+                  "Respuestas naturales con IA",
+                  "Integración con WhatsApp/Messenger",
+                  "Aprendizaje continuo",
+                  "Escalación automática a humanos"
+                ]}
+              />
+            </div>
+
+            {/* Roadmap Timeline */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-indigo-600" />
+                Roadmap 2025
+              </h3>
+              <div className="space-y-4">
+                <RoadmapItem
+                  quarter="Q1 2025"
+                  items={["Preventa Automatizada", "Chatbot MarIA v1", "Métricas de visitas/conversión"]}
+                  status="in-progress"
+                />
+                <RoadmapItem
+                  quarter="Q2 2025"
+                  items={["Postventa Inteligente", "Panel de Soporte", "Proyecciones ML avanzadas"]}
+                  status="planned"
+                />
+                <RoadmapItem
+                  quarter="Q3 2025"
+                  items={["App Móvil", "Multi-marketplace", "Análisis de competencia"]}
+                  status="future"
+                />
+              </div>
+            </div>
+
+            {/* Contact CTA */}
+            <div className="bg-gray-100 rounded-xl p-6 text-center">
+              <p className="text-gray-600 mb-2">¿Interesado en algún módulo específico?</p>
+              <a
+                href="mailto:bazaroimportaciones@gmail.com?subject=Consulta%20Módulos%20BAZAR"
+                className="inline-flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                <Mail className="w-5 h-5" />
+                Contáctanos
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-gray-500">
           Última actualización: {stats?.generated_at ? new Date(stats.generated_at).toLocaleString('es-CL') : '-'}
@@ -652,6 +763,85 @@ function HealthCard({ title, value, color }: {
     <div className={`${colors[color]} text-white rounded-xl p-4 text-center`}>
       <p className="text-3xl font-bold">{value}</p>
       <p className="text-sm opacity-90">{title}</p>
+    </div>
+  );
+}
+
+function ComingSoonCard({ title, description, icon: Icon, status, eta, features }: {
+  title: string;
+  description: string;
+  icon: React.ElementType;
+  status: string;
+  eta: string;
+  features: string[];
+}) {
+  const statusColors = {
+    'En desarrollo': 'bg-green-100 text-green-800',
+    'Planificado': 'bg-blue-100 text-blue-800',
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-6 border-2 border-dashed border-gray-200 relative overflow-hidden">
+      <div className="absolute top-0 right-0 bg-gradient-to-l from-purple-100 to-transparent w-32 h-32 -mr-10 -mt-10 rounded-full opacity-50" />
+
+      <div className="relative">
+        <div className="flex items-start justify-between mb-4">
+          <div className={`p-3 rounded-xl bg-purple-100`}>
+            <Icon className="w-6 h-6 text-purple-600" />
+          </div>
+          <div className="flex gap-2">
+            <span className={`px-2 py-1 text-xs rounded-full ${statusColors[status as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+              {status}
+            </span>
+            <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+              {eta}
+            </span>
+          </div>
+        </div>
+
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-4">{description}</p>
+
+        <div className="space-y-2">
+          {features.map((feature, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+              {feature}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoadmapItem({ quarter, items, status }: {
+  quarter: string;
+  items: string[];
+  status: 'in-progress' | 'planned' | 'future';
+}) {
+  const statusConfig = {
+    'in-progress': { bg: 'bg-green-500', border: 'border-green-500', text: 'text-green-700' },
+    'planned': { bg: 'bg-blue-500', border: 'border-blue-500', text: 'text-blue-700' },
+    'future': { bg: 'bg-gray-300', border: 'border-gray-300', text: 'text-gray-500' },
+  };
+
+  const config = statusConfig[status];
+
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center">
+        <div className={`w-4 h-4 rounded-full ${config.bg}`} />
+        <div className={`w-0.5 flex-1 ${config.bg} opacity-30`} />
+      </div>
+      <div className="pb-6">
+        <p className={`font-semibold ${config.text}`}>{quarter}</p>
+        <div className="mt-2 space-y-1">
+          {items.map((item, i) => (
+            <p key={i} className="text-sm text-gray-600">• {item}</p>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
