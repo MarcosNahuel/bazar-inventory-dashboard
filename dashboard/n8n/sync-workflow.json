@@ -1,0 +1,289 @@
+{
+  "name": "BAZAR - Sync Mercado Libre",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bazar-inventory-dashboard.vercel.app/api/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "type",
+              "value": "full"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "sync-products",
+      "name": "Sync Full",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-success",
+      "name": "Sync OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://bazar-inventory-dashboard.vercel.app/api/alerts",
+        "options": {}
+      },
+      "id": "get-alerts",
+      "name": "Obtener Alertas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.alerts?.length || 0 }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-alerts",
+      "name": "Hay Alertas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "alert-count",
+              "name": "alertCount",
+              "value": "={{ $json.alerts?.length || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "critical-count",
+              "name": "criticalCount",
+              "value": "={{ $json.alerts?.filter(a => a.severity === 'critical').length || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "=BAZAR Alertas:\n- Total: {{ $json.alerts?.length || 0 }}\n- Críticas: {{ $json.alerts?.filter(a => a.severity === 'critical').length || 0 }}\n\nProductos con stock bajo:\n{{ $json.alerts?.slice(0,5).map(a => '- ' + a.title + ' (Stock: ' + a.stock_total + ')').join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "format-alerts",
+      "name": "Formatear Alertas",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, -200]
+    },
+    {
+      "parameters": {
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "send-telegram",
+      "name": "Enviar Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, -200],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-msg",
+              "name": "error",
+              "value": "={{ $json.error || 'Sync failed' }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "log-error",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sync-summary",
+              "name": "summary",
+              "value": "=Sync completado:\n- Procesados: {{ $('Sync Full').item.json.items_processed }}\n- Creados: {{ $('Sync Full').item.json.items_created }}\n- Actualizados: {{ $('Sync Full').item.json.items_updated }}\n- Fallidos: {{ $('Sync Full').item.json.items_failed }}\n- Duración: {{ Math.round($('Sync Full').item.json.duration_ms / 1000) }}s",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "sync-summary",
+      "name": "Resumen Sync",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [880, 0]
+    }
+  ],
+  "connections": {
+    "Cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Sync Full",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Full": {
+      "main": [
+        [
+          {
+            "node": "Sync OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync OK?": {
+      "main": [
+        [
+          {
+            "node": "Obtener Alertas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener Alertas": {
+      "main": [
+        [
+          {
+            "node": "Hay Alertas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay Alertas?": {
+      "main": [
+        [
+          {
+            "node": "Formatear Alertas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumen Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Alertas": {
+      "main": [
+        [
+          {
+            "node": "Enviar Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "BAZAR",
+      "createdAt": "2025-12-18T00:00:00.000Z",
+      "updatedAt": "2025-12-18T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}
