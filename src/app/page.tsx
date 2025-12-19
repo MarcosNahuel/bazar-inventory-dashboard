@@ -5,7 +5,8 @@ import {
   Package, AlertTriangle, TrendingUp, DollarSign, ShoppingCart,
   RefreshCw, ExternalLink, BarChart3, PieChart, Users, Mail,
   Upload, FileSpreadsheet, Activity, Target, Boxes, Rocket,
-  MessageSquare, Headphones, Bot, Clock
+  MessageSquare, Headphones, Bot, Clock, LineChart, Brain,
+  Calendar, ArrowUpRight, ArrowDownRight, Moon, Sun
 } from 'lucide-react';
 import { StockStatusIndicator } from '@/components/ui/TrafficLight';
 import {
@@ -87,17 +88,89 @@ interface InventoryData {
   };
 }
 
-type TabType = 'overview' | 'inventory' | 'pareto' | 'costs' | 'alerts' | 'coming-soon';
+interface ProjectionsData {
+  historical: Array<{
+    date: string;
+    dayName: string;
+    dayOfWeek: number;
+    revenue: number;
+    orders_count: number;
+    units_sold: number;
+  }>;
+  projections: Array<{
+    date: string;
+    dayName: string;
+    dayOfWeek: number;
+    revenue_forecast: number;
+    revenue_lower: number;
+    revenue_upper: number;
+    orders_forecast: number;
+    units_forecast: number;
+  }>;
+  combined_series: Array<{
+    date: string;
+    dayName: string;
+    revenue: number | null;
+    revenue_forecast: number | null;
+    revenue_lower: number | null;
+    revenue_upper: number | null;
+    is_projection: boolean;
+  }>;
+  insights: string[];
+  seasonality: Record<number, number>;
+  regression: {
+    slope: number;
+    intercept: number;
+    r2: number;
+    daily_trend: number;
+    monthly_growth_pct: number;
+  };
+  summary: {
+    historical_days: number;
+    days_with_sales: number;
+    forecast_days: number;
+    total_historical_revenue: number;
+    total_projected_revenue: number;
+    avg_daily_revenue: number;
+    model: string;
+    generated_at: string;
+  };
+}
+
+type TabType = 'overview' | 'inventory' | 'pareto' | 'costs' | 'alerts' | 'projections' | 'coming-soon';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [stats, setStats] = useState<Stats | null>(null);
   const [alerts, setAlerts] = useState<{ summary: { total: number; urgent: number; warning: number; low: number }; products: Alert[] } | null>(null);
   const [inventory, setInventory] = useState<InventoryData | null>(null);
+  const [projections, setProjections] = useState<ProjectionsData | null>(null);
+  const [projectionsLoading, setProjectionsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [sendingAlerts, setSendingAlerts] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Initialize dark mode from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('darkMode');
+    if (saved === 'true') {
+      setDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+    if (!darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('darkMode', 'true');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('darkMode', 'false');
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -147,7 +220,29 @@ export default function Dashboard() {
     }
   };
 
+  const fetchProjections = async () => {
+    if (projections) return; // Already loaded
+    setProjectionsLoading(true);
+    try {
+      const res = await fetch('/api/projections?historical=365&forecast=30');
+      if (res.ok) {
+        const data = await res.json();
+        setProjections(data);
+      }
+    } catch (err) {
+      console.error('Error loading projections:', err);
+    } finally {
+      setProjectionsLoading(false);
+    }
+  };
+
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    if (activeTab === 'projections' && !projections && !projectionsLoading) {
+      fetchProjections();
+    }
+  }, [activeTab]);
 
   if (loading) {
     return (
@@ -166,6 +261,7 @@ export default function Dashboard() {
     { id: 'pareto', label: 'Pareto 80/20', icon: Target },
     { id: 'costs', label: 'Costos', icon: FileSpreadsheet },
     { id: 'alerts', label: 'Alertas', icon: AlertTriangle },
+    { id: 'projections', label: 'Proyecciones', icon: LineChart },
     { id: 'coming-soon', label: 'Próximamente', icon: Rocket },
   ];
 
@@ -180,6 +276,13 @@ export default function Dashboard() {
               <p className="text-sm text-gray-500">Gestor de Inventario - Mercado Libre Chile</p>
             </div>
             <div className="flex gap-2">
+              <button
+                onClick={toggleDarkMode}
+                className="flex items-center gap-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                title={darkMode ? 'Modo claro' : 'Modo oscuro'}
+              >
+                {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
               <button
                 onClick={sendEmailAlerts}
                 disabled={sendingAlerts}
@@ -597,6 +700,238 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Projections Tab */}
+        {activeTab === 'projections' && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-700 rounded-xl p-6 text-white">
+              <div className="flex items-center gap-3 mb-2">
+                <Brain className="w-8 h-8" />
+                <h2 className="text-2xl font-bold">Proyecciones ML</h2>
+              </div>
+              <p className="text-indigo-100">
+                Análisis predictivo basado en histórico de ventas 2024-2025 usando Machine Learning
+              </p>
+              {projections?.summary && (
+                <p className="text-sm text-indigo-200 mt-2">
+                  Modelo: {projections.summary.model}
+                </p>
+              )}
+            </div>
+
+            {projectionsLoading ? (
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+                <RefreshCw className="w-12 h-12 animate-spin text-indigo-600 mx-auto mb-4" />
+                <p className="text-gray-600">Cargando serie histórica y calculando proyecciones...</p>
+                <p className="text-sm text-gray-400 mt-2">Esto puede tomar unos segundos</p>
+              </div>
+            ) : projections ? (
+              <>
+                {/* KPI Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <div className="flex items-center gap-2 text-gray-500 mb-1">
+                      <Calendar className="w-4 h-4" />
+                      <span className="text-sm">Días Históricos</span>
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">{projections.summary.historical_days}</p>
+                    <p className="text-xs text-gray-400">{projections.summary.days_with_sales} con ventas</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <div className="flex items-center gap-2 text-gray-500 mb-1">
+                      <DollarSign className="w-4 h-4" />
+                      <span className="text-sm">Revenue Histórico</span>
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">
+                      ${(projections.summary.total_historical_revenue / 1000000).toFixed(1)}M
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <div className="flex items-center gap-2 text-gray-500 mb-1">
+                      <TrendingUp className="w-4 h-4" />
+                      <span className="text-sm">Proyección 30 días</span>
+                    </div>
+                    <p className="text-3xl font-bold text-indigo-600">
+                      ${(projections.summary.total_projected_revenue / 1000000).toFixed(1)}M
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <div className="flex items-center gap-2 text-gray-500 mb-1">
+                      <BarChart3 className="w-4 h-4" />
+                      <span className="text-sm">Promedio Diario</span>
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">
+                      ${(projections.summary.avg_daily_revenue / 1000).toFixed(0)}K
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <div className="flex items-center gap-2 text-gray-500 mb-1">
+                      <Activity className="w-4 h-4" />
+                      <span className="text-sm">R² Regresión</span>
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {(projections.regression.r2 * 100).toFixed(0)}%
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {projections.regression.monthly_growth_pct > 0 ? '+' : ''}{projections.regression.monthly_growth_pct.toFixed(1)}%/mes
+                    </p>
+                  </div>
+                </div>
+
+                {/* Time Series Chart */}
+                <div className="bg-white rounded-xl shadow-sm p-6">
+                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <LineChart className="w-5 h-5 text-indigo-600" />
+                    Serie Temporal de Ventas + Proyecciones
+                  </h3>
+                  <div className="h-80">
+                    <TimeSeriesChart data={projections.combined_series} />
+                  </div>
+                </div>
+
+                {/* Insights Panel */}
+                <div className="bg-white rounded-xl shadow-sm p-6">
+                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <Brain className="w-5 h-5 text-purple-600" />
+                    Insights y Recomendaciones (Análisis Prescriptivo)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {projections.insights.map((insight, i) => (
+                      <div key={i} className="p-4 bg-gray-50 rounded-lg border-l-4 border-indigo-500">
+                        <p className="text-gray-700">{insight}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Weekly Seasonality */}
+                {projections.seasonality && (
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-blue-600" />
+                      Ciclo Semanal (Estacionalidad)
+                    </h3>
+                    <div className="grid grid-cols-7 gap-2">
+                      {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((day, i) => {
+                        const factor = projections.seasonality[i] || 1;
+                        const isHigh = factor > 1.1;
+                        const isLow = factor < 0.9;
+                        return (
+                          <div key={i} className={`p-4 rounded-lg text-center ${
+                            isHigh ? 'bg-green-100 border-2 border-green-500' :
+                            isLow ? 'bg-red-100 border-2 border-red-300' :
+                            'bg-gray-100'
+                          }`}>
+                            <p className="text-sm font-medium text-gray-700">{day}</p>
+                            <p className={`text-2xl font-bold ${
+                              isHigh ? 'text-green-700' :
+                              isLow ? 'text-red-600' :
+                              'text-gray-600'
+                            }`}>
+                              {(factor * 100).toFixed(0)}%
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {isHigh ? '↑ Alto' : isLow ? '↓ Bajo' : 'Normal'}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tables */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Historical Table (last 14 days) */}
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b bg-gray-50">
+                      <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <Calendar className="w-5 h-5 text-gray-600" />
+                        Histórico Diario (últimos 14 días)
+                      </h3>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Día</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Órdenes</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {projections.historical.slice(-14).reverse().map((h, i) => (
+                            <tr key={i} className={`hover:bg-gray-50 ${h.revenue === 0 ? 'opacity-50' : ''}`}>
+                              <td className="px-4 py-2 text-sm font-medium text-gray-900">
+                                {new Date(h.date).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' })}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-gray-600">{h.dayName}</td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-900">
+                                {h.revenue > 0 ? `$${(h.revenue / 1000).toFixed(0)}K` : '-'}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-600">{h.orders_count || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Projections Table (next 14 days) */}
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b bg-indigo-50">
+                      <h3 className="text-lg font-semibold flex items-center gap-2 text-indigo-800">
+                        <TrendingUp className="w-5 h-5" />
+                        Proyección (próximos 14 días)
+                      </h3>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Día</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rango</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {projections.projections.slice(0, 14).map((p, i) => (
+                            <tr key={i} className="hover:bg-indigo-50">
+                              <td className="px-4 py-2 text-sm font-medium text-indigo-700">
+                                {new Date(p.date).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' })}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-indigo-600">{p.dayName}</td>
+                              <td className="px-4 py-2 text-sm text-right font-bold text-indigo-600">
+                                ${(p.revenue_forecast / 1000).toFixed(0)}K
+                              </td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-500">
+                                ${(p.revenue_lower / 1000).toFixed(0)}K - ${(p.revenue_upper / 1000).toFixed(0)}K
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+                <LineChart className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No se pudieron cargar las proyecciones</p>
+                <button
+                  onClick={() => { setProjections(null); fetchProjections(); }}
+                  className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                >
+                  Reintentar
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Coming Soon Tab */}
         {activeTab === 'coming-soon' && (
           <div className="space-y-6">
@@ -665,31 +1000,6 @@ export default function Dashboard() {
                   "Escalación automática a humanos"
                 ]}
               />
-            </div>
-
-            {/* Roadmap Timeline */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-indigo-600" />
-                Roadmap 2025
-              </h3>
-              <div className="space-y-4">
-                <RoadmapItem
-                  quarter="Q1 2025"
-                  items={["Preventa Automatizada", "Chatbot MarIA v1", "Métricas de visitas/conversión"]}
-                  status="in-progress"
-                />
-                <RoadmapItem
-                  quarter="Q2 2025"
-                  items={["Postventa Inteligente", "Panel de Soporte", "Proyecciones ML avanzadas"]}
-                  status="planned"
-                />
-                <RoadmapItem
-                  quarter="Q3 2025"
-                  items={["Multi-marketplace", "Análisis de competencia", "Integraciones avanzadas"]}
-                  status="future"
-                />
-              </div>
             </div>
 
             {/* Contact CTA */}
@@ -815,33 +1125,258 @@ function ComingSoonCard({ title, description, icon: Icon, status, eta, features 
   );
 }
 
-function RoadmapItem({ quarter, items, status }: {
-  quarter: string;
-  items: string[];
-  status: 'in-progress' | 'planned' | 'future';
+// Time Series Chart Component (SVG-based for simplicity)
+function TimeSeriesChart({ data }: {
+  data: Array<{
+    date: string;
+    dayName: string;
+    revenue: number | null;
+    revenue_forecast: number | null;
+    revenue_lower: number | null;
+    revenue_upper: number | null;
+    is_projection: boolean;
+  }>;
 }) {
-  const statusConfig = {
-    'in-progress': { bg: 'bg-green-500', border: 'border-green-500', text: 'text-green-700' },
-    'planned': { bg: 'bg-blue-500', border: 'border-blue-500', text: 'text-blue-700' },
-    'future': { bg: 'bg-gray-300', border: 'border-gray-300', text: 'text-gray-500' },
+  if (!data || data.length === 0) {
+    return <div className="text-center text-gray-500">Sin datos disponibles</div>;
+  }
+
+  const width = 900;
+  const height = 300;
+  const padding = { top: 30, right: 30, bottom: 60, left: 70 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  // Get all values for scaling
+  const allValues = data.flatMap(d => [
+    d.revenue,
+    d.revenue_forecast,
+    d.revenue_upper
+  ]).filter((v): v is number => v !== null && v > 0);
+
+  if (allValues.length === 0) {
+    return <div className="text-center text-gray-500">Sin datos de ventas disponibles</div>;
+  }
+
+  const maxValue = Math.max(...allValues) * 1.1; // 10% padding
+  const minValue = 0;
+
+  // Scale functions
+  const xScale = (index: number) => padding.left + (index / Math.max(data.length - 1, 1)) * chartWidth;
+  const yScale = (value: number) => padding.top + chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight;
+
+  // Generate path for historical data (only where revenue > 0)
+  const historicalData = data.filter(d => d.revenue !== null && d.revenue > 0);
+  const historicalPath = historicalData.map((d, i) => {
+    const x = xScale(data.indexOf(d));
+    const y = yScale(d.revenue!);
+    return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+  }).join(' ');
+
+  // Generate path for forecast data
+  const forecastData = data.filter(d => d.revenue_forecast !== null);
+
+  // Connect historical to forecast
+  const lastHistorical = historicalData[historicalData.length - 1];
+  const lastHistoricalX = lastHistorical ? xScale(data.indexOf(lastHistorical)) : 0;
+  const lastHistoricalY = lastHistorical ? yScale(lastHistorical.revenue!) : 0;
+
+  const forecastPath = forecastData.map((d, i) => {
+    const x = xScale(data.indexOf(d));
+    const y = yScale(d.revenue_forecast!);
+    if (i === 0 && lastHistorical) {
+      return `M ${lastHistoricalX} ${lastHistoricalY} L ${x} ${y}`;
+    }
+    return `L ${x} ${y}`;
+  }).join(' ');
+
+  // Generate confidence band path
+  const confidenceBandPath = forecastData.length > 0 ? (() => {
+    const upperPath = forecastData.map((d, i) => {
+      const x = xScale(data.indexOf(d));
+      const y = yScale(d.revenue_upper!);
+      return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+    }).join(' ');
+
+    const lowerPathReverse = [...forecastData].reverse().map((d) => {
+      const x = xScale(data.indexOf(d));
+      const y = yScale(d.revenue_lower!);
+      return `L ${x} ${y}`;
+    }).join(' ');
+
+    return `${upperPath} ${lowerPathReverse} Z`;
+  })() : '';
+
+  // Y-axis ticks
+  const yTicks = 5;
+  const yTickValues = Array.from({ length: yTicks }, (_, i) =>
+    minValue + ((maxValue - minValue) / (yTicks - 1)) * i
+  );
+
+  // Format date for x-axis label
+  const formatDateLabel = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
   };
 
-  const config = statusConfig[status];
+  // Select which dates to show on x-axis (every ~10 days for readability)
+  const labelInterval = Math.max(1, Math.ceil(data.length / 10));
 
   return (
-    <div className="flex gap-4">
-      <div className="flex flex-col items-center">
-        <div className={`w-4 h-4 rounded-full ${config.bg}`} />
-        <div className={`w-0.5 flex-1 ${config.bg} opacity-30`} />
-      </div>
-      <div className="pb-6">
-        <p className={`font-semibold ${config.text}`}>{quarter}</p>
-        <div className="mt-2 space-y-1">
-          {items.map((item, i) => (
-            <p key={i} className="text-sm text-gray-600">• {item}</p>
-          ))}
-        </div>
-      </div>
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[700px]">
+        {/* Grid lines */}
+        {yTickValues.map((tick, i) => (
+          <line
+            key={i}
+            x1={padding.left}
+            y1={yScale(tick)}
+            x2={width - padding.right}
+            y2={yScale(tick)}
+            stroke="#e5e7eb"
+            strokeDasharray="4,4"
+          />
+        ))}
+
+        {/* Vertical line separating historical from forecast */}
+        {lastHistorical && forecastData.length > 0 && (
+          <line
+            x1={lastHistoricalX}
+            y1={padding.top}
+            x2={lastHistoricalX}
+            y2={height - padding.bottom}
+            stroke="#94a3b8"
+            strokeDasharray="6,3"
+            strokeWidth="1"
+          />
+        )}
+
+        {/* Confidence band */}
+        {confidenceBandPath && (
+          <path
+            d={confidenceBandPath}
+            fill="rgba(99, 102, 241, 0.15)"
+            stroke="none"
+          />
+        )}
+
+        {/* Historical line */}
+        {historicalPath && (
+          <path
+            d={historicalPath}
+            fill="none"
+            stroke="#3b82f6"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {/* Forecast line */}
+        {forecastPath && (
+          <path
+            d={forecastPath}
+            fill="none"
+            stroke="#6366f1"
+            strokeWidth="2"
+            strokeDasharray="6,3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {/* Data points - Historical (only show some to avoid clutter) */}
+        {historicalData.filter((_, i) => i % 3 === 0 || i === historicalData.length - 1).map((d, i) => (
+          <circle
+            key={`hist-${i}`}
+            cx={xScale(data.indexOf(d))}
+            cy={yScale(d.revenue!)}
+            r="3"
+            fill="#3b82f6"
+            stroke="white"
+            strokeWidth="1.5"
+          />
+        ))}
+
+        {/* Data points - Forecast (only show some) */}
+        {forecastData.filter((_, i) => i % 3 === 0 || i === forecastData.length - 1).map((d, i) => (
+          <circle
+            key={`forecast-${i}`}
+            cx={xScale(data.indexOf(d))}
+            cy={yScale(d.revenue_forecast!)}
+            r="3"
+            fill="#6366f1"
+            stroke="white"
+            strokeWidth="1.5"
+          />
+        ))}
+
+        {/* Y-axis */}
+        <line
+          x1={padding.left}
+          y1={padding.top}
+          x2={padding.left}
+          y2={height - padding.bottom}
+          stroke="#9ca3af"
+        />
+
+        {/* X-axis */}
+        <line
+          x1={padding.left}
+          y1={height - padding.bottom}
+          x2={width - padding.right}
+          y2={height - padding.bottom}
+          stroke="#9ca3af"
+        />
+
+        {/* Y-axis labels */}
+        {yTickValues.map((tick, i) => (
+          <text
+            key={i}
+            x={padding.left - 10}
+            y={yScale(tick) + 4}
+            textAnchor="end"
+            className="text-xs fill-gray-500"
+          >
+            ${tick >= 1000000 ? `${(tick / 1000000).toFixed(1)}M` : `${(tick / 1000).toFixed(0)}K`}
+          </text>
+        ))}
+
+        {/* X-axis labels */}
+        {data.filter((_, i) => i % labelInterval === 0 || i === data.length - 1).map((d, i) => {
+          const index = data.indexOf(d);
+          return (
+            <g key={i}>
+              <text
+                x={xScale(index)}
+                y={height - padding.bottom + 18}
+                textAnchor="middle"
+                className={`text-xs ${d.is_projection ? 'fill-indigo-600 font-medium' : 'fill-gray-500'}`}
+              >
+                {formatDateLabel(d.date)}
+              </text>
+              {/* Small tick mark */}
+              <line
+                x1={xScale(index)}
+                y1={height - padding.bottom}
+                x2={xScale(index)}
+                y2={height - padding.bottom + 4}
+                stroke="#9ca3af"
+              />
+            </g>
+          );
+        })}
+
+        {/* Legend */}
+        <g transform={`translate(${padding.left + 20}, ${padding.top - 15})`}>
+          <line x1="0" y1="0" x2="20" y2="0" stroke="#3b82f6" strokeWidth="2" />
+          <text x="25" y="4" className="text-xs fill-gray-600">Histórico</text>
+          <line x1="90" y1="0" x2="110" y2="0" stroke="#6366f1" strokeWidth="2" strokeDasharray="4,2" />
+          <text x="115" y="4" className="text-xs fill-gray-600">Proyección</text>
+          <rect x="190" y="-5" width="20" height="10" fill="rgba(99, 102, 241, 0.15)" rx="2" />
+          <text x="215" y="4" className="text-xs fill-gray-600">Intervalo 95%</text>
+        </g>
+      </svg>
     </div>
   );
 }

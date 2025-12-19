@@ -167,17 +167,22 @@ class MercadoLibreClient {
   }
 
   // Obtener todas las órdenes de los últimos N días
-  async getAllOrders(daysBack = 30) {
+  async getAllOrders(daysBack = 30, maxOrders = 10000) {
     const allOrders = [];
     let offset = 0;
     const limit = 50;
     let hasMore = true;
 
-    while (hasMore) {
+    while (hasMore && allOrders.length < maxOrders) {
       const result = await this.getOrders(daysBack, limit, offset);
       allOrders.push(...result.results);
       offset += limit;
-      hasMore = offset < result.paging.total && offset < 1000; // Limit to 1000 orders
+      hasMore = offset < result.paging.total;
+
+      // Rate limiting
+      if (hasMore && allOrders.length < maxOrders) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
     }
 
     return allOrders;
@@ -229,6 +234,119 @@ class MercadoLibreClient {
     }
 
     return salesBySku;
+  }
+
+  // Obtener órdenes por rango de fechas
+  async getOrdersByDateRange(dateFrom: Date, dateTo: Date, limit = 50, offset = 0) {
+    const fromStr = dateFrom.toISOString().split('.')[0] + '.000-00:00';
+    const toStr = dateTo.toISOString().split('.')[0] + '.000-00:00';
+
+    return this.request<{
+      results: Array<{
+        id: number;
+        status: string;
+        date_created: string;
+        date_closed: string;
+        total_amount: number;
+        currency_id: string;
+        buyer: { id: number; nickname: string };
+        order_items: Array<{
+          item: { id: string; title: string; seller_sku: string | null };
+          quantity: number;
+          unit_price: number;
+        }>;
+        shipping: { id: number; status: string };
+      }>;
+      paging: { total: number; offset: number; limit: number };
+    }>(`/orders/search?seller=${this.userId}&order.date_created.from=${fromStr}&order.date_created.to=${toStr}&limit=${limit}&offset=${offset}&sort=date_asc`);
+  }
+
+  // Obtener todas las órdenes en un rango de fechas (paginado completo)
+  async getAllOrdersByDateRange(dateFrom: Date, dateTo: Date, maxOrders = 10000) {
+    const allOrders = [];
+    let offset = 0;
+    const limit = 50;
+    let hasMore = true;
+
+    while (hasMore && allOrders.length < maxOrders) {
+      const result = await this.getOrdersByDateRange(dateFrom, dateTo, limit, offset);
+      allOrders.push(...result.results);
+      offset += limit;
+      hasMore = offset < result.paging.total;
+
+      // Rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    return allOrders;
+  }
+
+  // Obtener serie temporal de ventas mensuales
+  async getMonthlySalesSeries(months = 24) {
+    const series: Array<{
+      month: string;
+      year: number;
+      month_num: number;
+      orders_count: number;
+      units_sold: number;
+      revenue: number;
+      avg_ticket: number;
+    }> = [];
+
+    const now = new Date();
+
+    // Iterar mes por mes hacia atrás
+    for (let i = 0; i < months; i++) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+
+      const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      const monthKey = `${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
+
+      try {
+        const orders = await this.getAllOrdersByDateRange(targetDate, nextMonth, 5000);
+
+        let totalUnits = 0;
+        let totalRevenue = 0;
+        let validOrders = 0;
+
+        for (const order of orders) {
+          if (order.status !== 'cancelled') {
+            validOrders++;
+            for (const item of order.order_items) {
+              totalUnits += item.quantity;
+              totalRevenue += item.quantity * item.unit_price;
+            }
+          }
+        }
+
+        series.unshift({
+          month: monthKey,
+          year: targetDate.getFullYear(),
+          month_num: targetDate.getMonth() + 1,
+          orders_count: validOrders,
+          units_sold: totalUnits,
+          revenue: Math.round(totalRevenue),
+          avg_ticket: validOrders > 0 ? Math.round(totalRevenue / validOrders) : 0
+        });
+      } catch (error) {
+        console.error(`Error fetching month ${monthKey}:`, error);
+        series.unshift({
+          month: monthKey,
+          year: targetDate.getFullYear(),
+          month_num: targetDate.getMonth() + 1,
+          orders_count: 0,
+          units_sold: 0,
+          revenue: 0,
+          avg_ticket: 0
+        });
+      }
+
+      // Rate limiting entre meses
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    return series;
   }
 
   // Obtener tokens actuales
