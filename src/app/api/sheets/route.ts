@@ -2,6 +2,7 @@
  * API Endpoint para Google Sheets
  * GET: Lee datos de costos desde el Sheet
  * POST: Actualiza costos en el Sheet
+ * PUT: Fuerza refresh del cache de costos
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,6 +12,7 @@ import {
   appendCostsToSheet,
   CostData,
 } from '@/lib/google-sheets/client';
+import { refreshCostsCache, getCacheStatus, invalidateCache } from '@/lib/google-sheets/costs-cache';
 
 interface SheetsResponse {
   success: boolean;
@@ -85,6 +87,34 @@ export async function POST(request: NextRequest): Promise<NextResponse<SheetsRes
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Error escribiendo en Google Sheets',
+    });
+  }
+}
+
+// PUT: Forzar refresh del cache de costos
+export async function PUT(): Promise<NextResponse> {
+  try {
+    // Invalidar cache actual
+    invalidateCache();
+
+    // Forzar recarga desde Google Sheets
+    const result = await refreshCostsCache();
+    const status = getCacheStatus();
+
+    return NextResponse.json({
+      success: true,
+      message: `Cache actualizado con ${result.count} costos`,
+      data: {
+        count: result.count,
+        timestamp: result.timestamp.toISOString(),
+        cacheStatus: status,
+      },
+    });
+  } catch (error) {
+    console.error('Error refreshing cache:', error);
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error actualizando cache',
     });
   }
 }

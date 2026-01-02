@@ -44,27 +44,74 @@ export function TrafficLight({ status, size = 'md', label, pulse = false }: Traf
 
 interface StockStatusIndicatorProps {
   stock: number;
-  threshold?: number;
+  ventas30d?: number; // NUEVO: Ventas de los últimos 30 días
+  threshold?: number; // Deprecated: solo para retrocompatibilidad
   showLabel?: boolean;
+  statusOverride?: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
 }
 
 export function StockStatusIndicator({
   stock,
+  ventas30d,
   threshold = 5,
-  showLabel = true
+  showLabel = true,
+  statusOverride
 }: StockStatusIndicatorProps) {
   let status: 'red' | 'yellow' | 'green';
   let label: string;
 
-  if (stock <= 1) {
-    status = 'red';
-    label = 'Crítico';
-  } else if (stock <= threshold) {
-    status = 'yellow';
-    label = 'Bajo';
-  } else {
-    status = 'green';
-    label = 'Normal';
+  // Si hay un override de estado, usarlo directamente
+  if (statusOverride) {
+    switch (statusOverride) {
+      case 'critical':
+        status = 'red';
+        label = 'Crítico';
+        break;
+      case 'warning':
+        status = 'yellow';
+        label = 'Alerta';
+        break;
+      case 'out_of_stock':
+        status = 'red';
+        label = 'Sin Stock';
+        break;
+      case 'overstocked':
+        status = 'yellow';
+        label = 'Sobrestock';
+        break;
+      default:
+        status = 'green';
+        label = 'Saludable';
+    }
+  }
+  // NUEVO CRITERIO: Stock >= Ventas30D = Saludable
+  else if (ventas30d !== undefined) {
+    if (stock === 0) {
+      status = 'red';
+      label = 'Sin Stock';
+    } else if (stock >= ventas30d) {
+      status = 'green';
+      label = 'Saludable';
+    } else if (stock >= ventas30d * 0.5) {
+      status = 'yellow';
+      label = 'Alerta';
+    } else {
+      status = 'red';
+      label = 'Crítico';
+    }
+  }
+  // Fallback al comportamiento anterior (para retrocompatibilidad)
+  else {
+    if (stock <= 1) {
+      status = 'red';
+      label = 'Crítico';
+    } else if (stock <= threshold) {
+      status = 'yellow';
+      label = 'Bajo';
+    } else {
+      status = 'green';
+      label = 'Normal';
+    }
   }
 
   return (

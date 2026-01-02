@@ -49,6 +49,7 @@ interface InventoryData {
       ventas_30d: number;
       stock: number;
       proveedor: string;
+      status?: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
     }>;
   };
   tickets: {
@@ -63,7 +64,17 @@ interface InventoryData {
     critical: number;
     out_of_stock: number;
     overstocked: number;
-    critical_items: Array<{ codigo_ml: string; titulo: string; days: number }>;
+    critical_items: Array<{ codigo_ml: string; titulo: string; days: number; stock: number; ventas_30d: number; status: string }>;
+    all_products?: Array<{
+      codigo_ml: string;
+      titulo: string;
+      stock: number;
+      ventas_30d: number;
+      days: number;
+      status: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
+      price: number;
+      logistic_type: string;
+    }>;
   };
   suppliers: Array<{
     proveedor: string;
@@ -74,15 +85,27 @@ interface InventoryData {
   }>;
   profitability: {
     avg_margin: number;
+    total_utilidad_30d?: number;
+    productos_con_costo?: number;
+    productos_sin_costo?: number;
     top_profitable: Array<{
       codigo_ml: string;
       titulo: string;
-      rentabilidad: number;
+      precio: number;
+      costo: number;
+      comision?: number;
+      envio?: number;
       utilidad: number;
+      rentabilidad: number;
+      utilidad_30d?: number;
+      ventas_30d?: number;
     }>;
     negative_margin: Array<{
       codigo_ml: string;
       titulo: string;
+      precio?: number;
+      costo?: number;
+      utilidad?: number;
       rentabilidad: number;
     }>;
   };
@@ -96,6 +119,7 @@ interface ProjectionsData {
     revenue: number;
     orders_count: number;
     units_sold: number;
+    utilidad?: number;
   }>;
   projections: Array<{
     date: string;
@@ -106,6 +130,8 @@ interface ProjectionsData {
     revenue_upper: number;
     orders_forecast: number;
     units_forecast: number;
+    utilidad_forecast?: number;
+    roi_forecast?: number;
   }>;
   combined_series: Array<{
     date: string;
@@ -114,6 +140,8 @@ interface ProjectionsData {
     revenue_forecast: number | null;
     revenue_lower: number | null;
     revenue_upper: number | null;
+    utilidad?: number | null;
+    utilidad_forecast?: number | null;
     is_projection: boolean;
   }>;
   insights: string[];
@@ -125,6 +153,23 @@ interface ProjectionsData {
     daily_trend: number;
     monthly_growth_pct: number;
   };
+  model_quality?: {
+    mape: number;
+    mape_interpretation: string;
+    cv: number;
+    r2: number;
+    r2_note: string;
+  };
+  methodology?: {
+    model: string;
+    description: string;
+    components: string[];
+    metrics_explained: {
+      MAPE: string;
+      CV: string;
+      R2: string;
+    };
+  };
   summary: {
     historical_days: number;
     days_with_sales: number;
@@ -134,6 +179,14 @@ interface ProjectionsData {
     avg_daily_revenue: number;
     model: string;
     generated_at: string;
+  };
+  financial?: {
+    avg_cost_ratio: number;
+    avg_margin: number;
+    historical_utilidad: number;
+    projected_utilidad_30d: number;
+    roi_estimado: number;
+    nota: string;
   };
 }
 
@@ -466,6 +519,16 @@ export default function Dashboard() {
         {/* Inventory Tab */}
         {activeTab === 'inventory' && inventory?.stock_health && (
           <div className="space-y-6">
+            {/* Explicación del Criterio */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <h4 className="font-semibold text-blue-800 mb-2">📊 Criterio de Salud de Stock</h4>
+              <p className="text-sm text-blue-700">
+                <strong>Saludable:</strong> Stock ≥ Ventas30D (cubre el próximo mes) |
+                <strong> Alerta:</strong> Stock entre 50%-100% de Ventas30D |
+                <strong> Crítico:</strong> Stock &lt; 50% de Ventas30D
+              </p>
+            </div>
+
             {/* Stock Health Cards */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <HealthCard title="Saludable" value={inventory.stock_health.healthy} color="green" />
@@ -475,40 +538,70 @@ export default function Dashboard() {
               <HealthCard title="Sobrestock" value={inventory.stock_health.overstocked} color="purple" />
             </div>
 
-            {/* Critical Items */}
+            {/* TODOS los productos */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b bg-red-50">
-                <h3 className="text-lg font-semibold text-red-800 flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  Productos Críticos (días de stock restantes)
+              <div className="px-6 py-4 border-b">
+                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                  <Boxes className="w-5 h-5 text-blue-600" />
+                  Todos los Productos ({inventory.stock_health.all_products?.length || 0})
                 </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Ordenados por estado de urgencia (críticos primero)
+                </p>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Días Stock</th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Stock</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Días Stock</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {inventory.stock_health.critical_items.slice(0, 20).map((item, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-6 py-3 text-sm text-gray-500">{item.codigo_ml}</td>
-                        <td className="px-6 py-3 text-sm text-gray-900">{item.titulo}</td>
-                        <td className="px-6 py-3 text-center">
-                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                            item.days <= 7 ? 'bg-red-100 text-red-800' :
-                            item.days <= 14 ? 'bg-yellow-100 text-yellow-800' :
+                    {(inventory.stock_health.all_products || []).map((item, i) => (
+                      <tr key={i} className={`hover:bg-gray-50 ${
+                        item.status === 'critical' ? 'bg-red-50' :
+                        item.status === 'warning' ? 'bg-yellow-50' :
+                        item.status === 'out_of_stock' ? 'bg-gray-100' :
+                        ''
+                      }`}>
+                        <td className="px-4 py-3 text-sm text-gray-500 font-mono">{item.codigo_ml}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{item.titulo}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-1 rounded text-sm font-medium ${
+                            item.stock === 0 ? 'bg-gray-200 text-gray-600' :
+                            item.stock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                            item.stock < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
                             'bg-green-100 text-green-800'
                           }`}>
-                            {item.days} días
+                            {item.stock}
                           </span>
                         </td>
-                        <td className="px-6 py-3 text-center">
-                          <StockStatusIndicator stock={item.days} threshold={14} />
+                        <td className="px-4 py-3 text-center text-sm text-gray-600">{item.ventas_30d}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            item.days <= 7 ? 'bg-red-100 text-red-800' :
+                            item.days <= 30 ? 'bg-yellow-100 text-yellow-800' :
+                            item.days > 90 ? 'bg-purple-100 text-purple-800' :
+                            'bg-green-100 text-green-800'
+                          }`}>
+                            {item.days === 999 ? '∞' : `${item.days}d`}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-gray-900">
+                          ${item.price.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <StockStatusIndicator
+                            stock={item.stock}
+                            ventas30d={item.ventas_30d}
+                            statusOverride={item.status}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -565,7 +658,11 @@ export default function Dashboard() {
                         <td className="px-6 py-3 text-right font-medium text-gray-900">{p.ventas_30d}</td>
                         <td className="px-6 py-3 text-right text-gray-600">{p.stock}</td>
                         <td className="px-6 py-3 text-center">
-                          <StockStatusIndicator stock={p.stock} />
+                          <StockStatusIndicator
+                            stock={p.stock}
+                            ventas30d={p.ventas_30d}
+                            statusOverride={p.status}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -579,6 +676,33 @@ export default function Dashboard() {
         {/* Costs Tab */}
         {activeTab === 'costs' && (
           <div className="space-y-6">
+            {/* Google Sheets Link */}
+            <div className="bg-gradient-to-r from-green-600 to-emerald-700 rounded-xl p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <FileSpreadsheet className="w-8 h-8" />
+                    <h2 className="text-2xl font-bold">Base de Costos - Google Sheets</h2>
+                  </div>
+                  <p className="text-green-100">
+                    Edita los costos directamente en Google Sheets. Los cambios se sincronizan automáticamente.
+                  </p>
+                  <p className="text-sm text-green-200 mt-2">
+                    Columnas editables: Costo, Proveedor, Caja Maestra
+                  </p>
+                </div>
+                <a
+                  href="https://docs.google.com/spreadsheets/d/1z2yPe2-_pf-m86P9gFetlh7lapVANF8um_qsbNZdOEc"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 bg-white text-green-700 px-6 py-3 rounded-lg hover:bg-green-50 transition-colors font-semibold"
+                >
+                  <ExternalLink className="w-5 h-5" />
+                  Abrir Google Sheet
+                </a>
+              </div>
+            </div>
+
             {/* Cost Uploader */}
             <CostUploader onUpload={async (costs) => {
               const res = await fetch('/api/costs/update', {
@@ -592,28 +716,145 @@ export default function Dashboard() {
             {/* Profitability Analysis */}
             {inventory?.profitability && (
               <>
-                <div className="bg-white rounded-xl shadow-sm p-6">
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-green-600" />
-                    Margen Promedio: {inventory.profitability.avg_margin}%
-                  </h3>
-                  <ProfitabilityChart data={inventory.profitability.top_profitable} />
+                {/* KPIs de Rentabilidad */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <p className="text-sm text-gray-500">Margen Promedio</p>
+                    <p className={`text-3xl font-bold ${inventory.profitability.avg_margin > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {inventory.profitability.avg_margin}%
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <p className="text-sm text-gray-500">Utilidad 30 días</p>
+                    <p className="text-3xl font-bold text-blue-600">
+                      ${((inventory.profitability.total_utilidad_30d || 0) / 1000).toFixed(0)}K
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <p className="text-sm text-gray-500">Con Costo</p>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {inventory.profitability.productos_con_costo || 0}
+                    </p>
+                    <p className="text-xs text-gray-400">productos</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <p className="text-sm text-gray-500">Sin Costo</p>
+                    <p className={`text-3xl font-bold ${(inventory.profitability.productos_sin_costo || 0) > 0 ? 'text-yellow-600' : 'text-green-600'}`}>
+                      {inventory.profitability.productos_sin_costo || 0}
+                    </p>
+                    <p className="text-xs text-gray-400">completar en Sheet</p>
+                  </div>
+                </div>
+
+                {/* Top Productos Rentables */}
+                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b bg-green-50">
+                    <h3 className="text-lg font-semibold text-green-800 flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5" />
+                      Top 10 Productos Más Rentables (Utilidad 30D)
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Comisión</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad/U</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad 30D</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">ROI</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {inventory.profitability.top_profitable.map((p, i) => (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <p className="text-sm font-medium text-gray-900">{p.titulo}</p>
+                              <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-900">
+                              ${p.precio.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">
+                              ${p.costo.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-500">
+                              ${(p.comision || 0).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${p.utilidad > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                ${p.utilidad.toLocaleString()}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">
+                              {p.ventas_30d || 0}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm font-bold text-green-600">
+                              ${((p.utilidad_30d || 0) / 1000).toFixed(0)}K
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${p.rentabilidad > 30 ? 'bg-green-100 text-green-800' : p.rentabilidad > 15 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
+                                {p.rentabilidad}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {/* Negative Margin Alert */}
                 {inventory.profitability.negative_margin.length > 0 && (
-                  <div className="bg-red-50 rounded-xl shadow-sm p-6 border border-red-200">
-                    <h3 className="text-lg font-semibold text-red-800 mb-4 flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5" />
-                      Productos con Margen Negativo ({inventory.profitability.negative_margin.length})
-                    </h3>
-                    <div className="space-y-2">
-                      {inventory.profitability.negative_margin.map((p, i) => (
-                        <div key={i} className="flex justify-between items-center p-3 bg-white rounded-lg">
-                          <span className="text-sm text-gray-900">{p.titulo}</span>
-                          <span className="text-sm font-bold text-red-600">{p.rentabilidad}%</span>
-                        </div>
-                      ))}
+                  <div className="bg-red-50 rounded-xl shadow-sm overflow-hidden border border-red-200">
+                    <div className="px-6 py-4 border-b border-red-200">
+                      <h3 className="text-lg font-semibold text-red-800 flex items-center gap-2">
+                        <AlertTriangle className="w-5 h-5" />
+                        ⚠️ Productos con Margen Negativo ({inventory.profitability.negative_margin.length})
+                      </h3>
+                      <p className="text-sm text-red-600 mt-1">
+                        Estos productos generan pérdidas. Revisa los costos en Google Sheets.
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-red-200">
+                        <thead className="bg-red-100">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-red-800 uppercase">Producto</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Precio</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Costo</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Pérdida/U</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">ROI</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-red-100">
+                          {inventory.profitability.negative_margin.map((p, i) => (
+                            <tr key={i} className="hover:bg-red-50">
+                              <td className="px-4 py-3">
+                                <p className="text-sm font-medium text-gray-900">{p.titulo}</p>
+                                <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-900">
+                                ${(p.precio || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-600">
+                                ${(p.costo || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
+                                ${(p.utilidad || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className="px-2 py-1 rounded text-sm font-bold bg-red-200 text-red-800">
+                                  {p.rentabilidad}%
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -767,16 +1008,109 @@ export default function Dashboard() {
                   <div className="bg-white rounded-xl shadow-sm p-6">
                     <div className="flex items-center gap-2 text-gray-500 mb-1">
                       <Activity className="w-4 h-4" />
-                      <span className="text-sm">R² Regresión</span>
+                      <span className="text-sm">MAPE (Precisión)</span>
                     </div>
-                    <p className="text-3xl font-bold text-gray-900">
-                      {(projections.regression.r2 * 100).toFixed(0)}%
+                    <p className={`text-3xl font-bold ${
+                      (projections.model_quality?.mape || 0) < 20 ? 'text-green-600' :
+                      (projections.model_quality?.mape || 0) < 30 ? 'text-yellow-600' :
+                      'text-gray-600'
+                    }`}>
+                      {projections.model_quality?.mape?.toFixed(1) || '—'}%
                     </p>
                     <p className="text-xs text-gray-400">
-                      {projections.regression.monthly_growth_pct > 0 ? '+' : ''}{projections.regression.monthly_growth_pct.toFixed(1)}%/mes
+                      {projections.model_quality?.mape_interpretation || 'Error promedio'}
                     </p>
                   </div>
                 </div>
+
+                {/* Financial KPIs */}
+                {projections.financial && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl shadow-sm p-6 border border-green-200">
+                      <div className="flex items-center gap-2 text-green-700 mb-1">
+                        <DollarSign className="w-4 h-4" />
+                        <span className="text-sm font-medium">Utilidad Histórica</span>
+                      </div>
+                      <p className="text-3xl font-bold text-green-800">
+                        ${(projections.financial.historical_utilidad / 1000000).toFixed(2)}M
+                      </p>
+                      <p className="text-xs text-green-600">Basado en margen promedio</p>
+                    </div>
+                    <div className="bg-gradient-to-br from-purple-50 to-violet-100 rounded-xl shadow-sm p-6 border border-purple-200">
+                      <div className="flex items-center gap-2 text-purple-700 mb-1">
+                        <TrendingUp className="w-4 h-4" />
+                        <span className="text-sm font-medium">Utilidad Proyectada 30D</span>
+                      </div>
+                      <p className="text-3xl font-bold text-purple-800">
+                        ${(projections.financial.projected_utilidad_30d / 1000000).toFixed(2)}M
+                      </p>
+                      <p className="text-xs text-purple-600">Próximos 30 días</p>
+                    </div>
+                    <div className="bg-gradient-to-br from-blue-50 to-cyan-100 rounded-xl shadow-sm p-6 border border-blue-200">
+                      <div className="flex items-center gap-2 text-blue-700 mb-1">
+                        <Activity className="w-4 h-4" />
+                        <span className="text-sm font-medium">Margen Promedio</span>
+                      </div>
+                      <p className="text-3xl font-bold text-blue-800">
+                        {projections.financial.avg_margin}%
+                      </p>
+                      <p className="text-xs text-blue-600">Sobre ventas</p>
+                    </div>
+                    <div className="bg-gradient-to-br from-amber-50 to-yellow-100 rounded-xl shadow-sm p-6 border border-amber-200">
+                      <div className="flex items-center gap-2 text-amber-700 mb-1">
+                        <BarChart3 className="w-4 h-4" />
+                        <span className="text-sm font-medium">ROI Estimado</span>
+                      </div>
+                      <p className="text-3xl font-bold text-amber-800">
+                        {projections.financial.roi_estimado}%
+                      </p>
+                      <p className="text-xs text-amber-600">Retorno sobre inversión</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Model Quality & Methodology Documentation */}
+                {projections.model_quality && (
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-6 border border-blue-200">
+                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-blue-600" />
+                      Calidad del Modelo y Metodología
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                      <div className="bg-white p-4 rounded-lg">
+                        <p className="text-sm text-gray-500">MAPE (Error Promedio)</p>
+                        <p className="text-2xl font-bold text-blue-600">{projections.model_quality.mape}%</p>
+                        <p className="text-xs text-gray-400">{projections.model_quality.mape_interpretation}</p>
+                      </div>
+                      <div className="bg-white p-4 rounded-lg">
+                        <p className="text-sm text-gray-500">CV (Volatilidad)</p>
+                        <p className="text-2xl font-bold text-purple-600">{projections.model_quality.cv}%</p>
+                        <p className="text-xs text-gray-400">Variación día a día</p>
+                      </div>
+                      <div className="bg-white p-4 rounded-lg">
+                        <p className="text-sm text-gray-500">R² (Determinación)</p>
+                        <p className="text-2xl font-bold text-gray-600">{projections.model_quality.r2}%</p>
+                        <p className="text-xs text-gray-400">Bajo es normal en e-commerce</p>
+                      </div>
+                    </div>
+                    {projections.methodology && (
+                      <div className="bg-white p-4 rounded-lg">
+                        <p className="font-medium text-gray-800 mb-2">{projections.methodology.model}</p>
+                        <p className="text-sm text-gray-600 mb-3">{projections.methodology.description}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {projections.methodology.components.map((comp, i) => (
+                            <span key={i} className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+                              {comp}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-3 italic">
+                          💡 {projections.model_quality.r2_note}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Time Series Chart */}
                 <div className="bg-white rounded-xl shadow-sm p-6">
@@ -857,22 +1191,31 @@ export default function Dashboard() {
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Día</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Órdenes</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                          {projections.historical.slice(-14).reverse().map((h, i) => (
-                            <tr key={i} className={`hover:bg-gray-50 ${h.revenue === 0 ? 'opacity-50' : ''}`}>
-                              <td className="px-4 py-2 text-sm font-medium text-gray-900">
-                                {new Date(h.date).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' })}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-gray-600">{h.dayName}</td>
-                              <td className="px-4 py-2 text-sm text-right text-gray-900">
-                                {h.revenue > 0 ? `$${(h.revenue / 1000).toFixed(0)}K` : '-'}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-right text-gray-600">{h.orders_count || '-'}</td>
-                            </tr>
-                          ))}
+                          {projections.historical.slice(-14).reverse().map((h, i) => {
+                            // Calcular utilidad estimada usando el margen promedio del financial
+                            const avgMargin = projections.financial?.avg_margin || 15;
+                            const utilidadEstimada = h.revenue > 0 ? Math.round(h.revenue * (avgMargin / 100)) : 0;
+                            return (
+                              <tr key={i} className={`hover:bg-gray-50 ${h.revenue === 0 ? 'opacity-50' : ''}`}>
+                                <td className="px-4 py-2 text-sm font-medium text-gray-900">
+                                  {new Date(h.date).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' })}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-gray-600">{h.dayName}</td>
+                                <td className="px-4 py-2 text-sm text-right text-gray-900">
+                                  {h.revenue > 0 ? `$${(h.revenue / 1000).toFixed(0)}K` : '-'}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-right text-green-600 font-medium">
+                                  {utilidadEstimada > 0 ? `$${(utilidadEstimada / 1000).toFixed(0)}K` : '-'}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-right text-gray-600">{h.orders_count || '-'}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -893,7 +1236,8 @@ export default function Dashboard() {
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Día</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rango</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">ROI</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -906,8 +1250,17 @@ export default function Dashboard() {
                               <td className="px-4 py-2 text-sm text-right font-bold text-indigo-600">
                                 ${(p.revenue_forecast / 1000).toFixed(0)}K
                               </td>
-                              <td className="px-4 py-2 text-sm text-right text-gray-500">
-                                ${(p.revenue_lower / 1000).toFixed(0)}K - ${(p.revenue_upper / 1000).toFixed(0)}K
+                              <td className="px-4 py-2 text-sm text-right text-green-600 font-medium">
+                                ${((p.utilidad_forecast || 0) / 1000).toFixed(0)}K
+                              </td>
+                              <td className="px-4 py-2 text-sm text-right">
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  (p.roi_forecast || 0) > 30 ? 'bg-green-100 text-green-800' :
+                                  (p.roi_forecast || 0) > 15 ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {p.roi_forecast || projections.financial?.roi_estimado || 0}%
+                                </span>
                               </td>
                             </tr>
                           ))}

@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
+import { getCachedCosts, CostData } from '@/lib/google-sheets/costs-cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
+
+// Constantes para cálculo de utilidad
+const ML_COMMISSION = 0.13; // 13% comisión MercadoLibre
+const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '3000');
 
 // Cache para evitar múltiples llamadas a la API de ML
 interface CacheEntry {
@@ -22,6 +27,11 @@ interface DailyData {
   orders_count: number;
   units_sold: number;
   revenue: number;
+  // Nuevos campos financieros
+  costo_estimado?: number;
+  utilidad_bruta?: number;
+  utilidad_neta?: number;
+  roi?: number;
 }
 
 interface ProjectedDay {
@@ -34,6 +44,9 @@ interface ProjectedDay {
   orders_forecast: number;
   units_forecast: number;
   is_projection: boolean;
+  // Nuevos campos financieros
+  utilidad_forecast?: number;
+  roi_forecast?: number;
 }
 
 // Check if cache is valid
@@ -203,12 +216,75 @@ function stdDev(data: number[]): number {
   return Math.sqrt(squareDiffs.reduce((a, b) => a + b, 0) / (data.length - 1));
 }
 
+// Calculate MAPE (Mean Absolute Percentage Error)
+// Mide el error promedio en porcentaje - más intuitivo que R²
+function calculateMAPE(actual: number[], predicted: number[]): number {
+  if (actual.length !== predicted.length || actual.length === 0) return 0;
+
+  let sumAPE = 0;
+  let validCount = 0;
+
+  for (let i = 0; i < actual.length; i++) {
+    if (actual[i] > 0) { // Evitar división por cero
+      sumAPE += Math.abs((actual[i] - predicted[i]) / actual[i]);
+      validCount++;
+    }
+  }
+
+  return validCount > 0 ? (sumAPE / validCount) * 100 : 0;
+}
+
+// Calculate coefficient of variation (CV) - mide volatilidad
+function calculateCV(data: number[]): number {
+  const avg = data.reduce((a, b) => a + b, 0) / data.length;
+  if (avg === 0) return 0;
+  const sd = stdDev(data);
+  return (sd / avg) * 100;
+}
+
+// Calculate average cost ratio from Google Sheets costs
+async function getAverageCostRatio(): Promise<{ avgCostRatio: number; avgMargin: number }> {
+  try {
+    const costs = await getCachedCosts();
+    if (costs.length === 0) {
+      return { avgCostRatio: 0.5, avgMargin: 0.2 }; // Default 50% costo, 20% margen
+    }
+
+    // Calcular ratio promedio costo/precio estimado (asumiendo markup de 50%)
+    let totalCosto = 0;
+    let totalPrecioEstimado = 0;
+    let count = 0;
+
+    for (const cost of costs) {
+      if (cost.costo > 0) {
+        totalCosto += cost.costo;
+        // Precio estimado = costo + 50% markup
+        const precioEstimado = cost.costo * 1.5;
+        totalPrecioEstimado += precioEstimado;
+        count++;
+      }
+    }
+
+    if (count === 0) return { avgCostRatio: 0.5, avgMargin: 0.2 };
+
+    const avgCostRatio = totalCosto / totalPrecioEstimado;
+    // Margen neto aproximado después de comisiones
+    const avgMargin = (1 - avgCostRatio - ML_COMMISSION) * 0.9; // 90% para otros gastos
+
+    return { avgCostRatio, avgMargin: Math.max(avgMargin, 0.05) };
+  } catch {
+    console.error('[Projections] Error loading costs for margin calculation');
+    return { avgCostRatio: 0.5, avgMargin: 0.15 };
+  }
+}
+
 // Generate projections using regression + seasonality
 function generateProjections(
   historical: DailyData[],
   daysAhead: number,
   regression: { slope: number; intercept: number; r2: number },
-  seasonality: Record<number, number>
+  seasonality: Record<number, number>,
+  avgMargin: number = 0.15
 ): ProjectedDay[] {
   const projections: ProjectedDay[] = [];
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -266,6 +342,10 @@ function generateProjections(
 
     const ordersForecast = revenuePerOrder > 0 ? forecast / revenuePerOrder : 0;
 
+    // Calcular utilidad proyectada
+    const utilidadForecast = Math.round(forecast * avgMargin);
+    const roiForecast = avgMargin > 0 ? Math.round((avgMargin / (1 - avgMargin - ML_COMMISSION)) * 1000) / 10 : 0;
+
     projections.push({
       date: dateStr,
       dayOfWeek,
@@ -275,19 +355,23 @@ function generateProjections(
       revenue_upper: Math.round(forecast + confidenceFactor),
       orders_forecast: Math.round(ordersForecast),
       units_forecast: Math.round(ordersForecast * unitsPerOrder),
-      is_projection: true
+      is_projection: true,
+      utilidad_forecast: utilidadForecast,
+      roi_forecast: roiForecast,
     });
   }
 
   return projections;
 }
 
-// Generate insights
+// Generate insights with model documentation
 function generateInsights(
   historical: DailyData[],
   regression: { slope: number; intercept: number; r2: number },
   seasonality: Record<number, number>,
-  projections: ProjectedDay[]
+  projections: ProjectedDay[],
+  mape: number = 0,
+  cv: number = 0
 ): string[] {
   const insights: string[] = [];
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -301,16 +385,38 @@ function generateInsights(
   insights.push(`📊 Serie histórica: ${historical.length} días (${daysWithData.length} con ventas)`);
   insights.push(`💰 Ventas totales: $${(totalRevenue / 1000000).toFixed(2)}M CLP en ${totalOrders.toLocaleString()} órdenes`);
 
+  // Model accuracy - MAPE (más intuitivo que R²)
+  if (mape > 0) {
+    let mapeInterpretation = '';
+    if (mape < 10) {
+      mapeInterpretation = 'Excelente precisión';
+    } else if (mape < 20) {
+      mapeInterpretation = 'Buena precisión';
+    } else if (mape < 30) {
+      mapeInterpretation = 'Precisión aceptable';
+    } else {
+      mapeInterpretation = 'Alta variabilidad en ventas';
+    }
+    insights.push(`📐 MAPE: ${mape.toFixed(1)}% (${mapeInterpretation})`);
+  }
+
+  // Explain R² in context
+  if (cv > 50) {
+    insights.push(`⚡ Volatilidad: ${cv.toFixed(0)}% - Las ventas diarias varían mucho, lo que es normal en e-commerce (R² bajo es esperado)`);
+  } else if (cv > 30) {
+    insights.push(`📈 Volatilidad: ${cv.toFixed(0)}% - Variabilidad moderada en ventas diarias`);
+  }
+
   // Trend analysis
   const dailyGrowth = regression.slope;
   const monthlyGrowthRate = avgDaily > 0 ? (dailyGrowth * 30 / avgDaily) * 100 : 0;
 
   if (monthlyGrowthRate > 5) {
-    insights.push(`📈 Tendencia: Crecimiento de ${monthlyGrowthRate.toFixed(1)}% mensual (R²=${(regression.r2 * 100).toFixed(0)}%)`);
+    insights.push(`📈 Tendencia: Crecimiento de ${monthlyGrowthRate.toFixed(1)}% mensual`);
   } else if (monthlyGrowthRate < -5) {
-    insights.push(`📉 Tendencia: Decrecimiento de ${Math.abs(monthlyGrowthRate).toFixed(1)}% mensual (R²=${(regression.r2 * 100).toFixed(0)}%)`);
+    insights.push(`📉 Tendencia: Decrecimiento de ${Math.abs(monthlyGrowthRate).toFixed(1)}% mensual`);
   } else {
-    insights.push(`➡️ Tendencia: Estable (${monthlyGrowthRate.toFixed(1)}% mensual, R²=${(regression.r2 * 100).toFixed(0)}%)`);
+    insights.push(`➡️ Tendencia: Estable (${monthlyGrowthRate >= 0 ? '+' : ''}${monthlyGrowthRate.toFixed(1)}% mensual)`);
   }
 
   // Best and worst days
@@ -399,16 +505,32 @@ export async function GET(request: NextRequest) {
     // Calculate weekly seasonality
     const seasonality = calculateWeeklySeasonality(daysWithData);
 
-    // Generate projections
+    // Calculate MAPE for model validation (usando los últimos 14 días)
+    const last14 = daysWithData.slice(-14);
+    const predictedLast14 = last14.map((d, i) => {
+      const dayIndex = daysWithData.length - 14 + i;
+      const baseValue = regression.intercept + regression.slope * dayIndex;
+      return baseValue * (seasonality[d.dayOfWeek] || 1);
+    });
+    const mape = calculateMAPE(last14.map(d => d.revenue), predictedLast14);
+
+    // Coeficiente de variación (volatilidad)
+    const cv = calculateCV(revenueData);
+
+    // Obtener margen promedio desde costos
+    const { avgCostRatio, avgMargin } = await getAverageCostRatio();
+
+    // Generate projections with profit calculation
     const projections = generateProjections(
       dailySeries,
       Math.min(forecastDays, 60),
       regression,
-      seasonality
+      seasonality,
+      avgMargin
     );
 
-    // Generate insights
-    const insights = generateInsights(dailySeries, regression, seasonality, projections);
+    // Generate insights with better documentation
+    const insights = generateInsights(dailySeries, regression, seasonality, projections, mape, cv);
 
     // Find the first day with sales to trim empty historical period
     const firstSaleIndex = dailySeries.findIndex(d => d.revenue > 0);
@@ -422,9 +544,11 @@ export async function GET(request: NextRequest) {
         revenue: d.revenue,
         orders_count: d.orders_count,
         units_sold: d.units_sold,
+        utilidad: Math.round(d.revenue * avgMargin), // Estimación basada en margen promedio
         revenue_forecast: null as number | null,
         revenue_lower: null as number | null,
         revenue_upper: null as number | null,
+        utilidad_forecast: null as number | null,
         is_projection: false
       })),
       ...projections.map(p => ({
@@ -433,9 +557,11 @@ export async function GET(request: NextRequest) {
         revenue: null as number | null,
         orders_count: null as number | null,
         units_sold: null as number | null,
+        utilidad: null as number | null,
         revenue_forecast: p.revenue_forecast,
         revenue_lower: p.revenue_lower,
         revenue_upper: p.revenue_upper,
+        utilidad_forecast: p.utilidad_forecast,
         is_projection: true
       }))
     ];
@@ -443,6 +569,8 @@ export async function GET(request: NextRequest) {
     // Calculate summary statistics
     const historicalRevenue = dailySeries.reduce((sum, d) => sum + d.revenue, 0);
     const projectedRevenue = projections.reduce((sum, p) => sum + p.revenue_forecast, 0);
+    const historicalUtilidad = Math.round(historicalRevenue * avgMargin);
+    const projectedUtilidad = projections.reduce((sum, p) => sum + (p.utilidad_forecast || 0), 0);
 
     const response = {
       historical: dailySeries,
@@ -457,6 +585,28 @@ export async function GET(request: NextRequest) {
         daily_trend: regression.slope,
         monthly_growth_pct: (regression.slope * 30 / (historicalRevenue / dailySeries.length)) * 100
       },
+      // NUEVAS MÉTRICAS DE CALIDAD
+      model_quality: {
+        mape: Math.round(mape * 10) / 10,
+        mape_interpretation: mape < 10 ? 'Excelente' : mape < 20 ? 'Buena' : mape < 30 ? 'Aceptable' : 'Alta variabilidad',
+        cv: Math.round(cv * 10) / 10,
+        r2: Math.round(regression.r2 * 1000) / 10,
+        r2_note: 'R² bajo es normal en e-commerce debido a la alta variabilidad diaria. Use MAPE como métrica principal.',
+      },
+      methodology: {
+        model: 'Regresión Lineal + Estacionalidad Semanal',
+        description: 'Modelo híbrido que combina tendencia lineal con factores de estacionalidad por día de la semana.',
+        components: [
+          'Tendencia: Regresión lineal sobre datos históricos',
+          'Estacionalidad: Factores multiplicativos por día de la semana',
+          'Intervalos de confianza: ±1.96 desviaciones estándar (95%)',
+        ],
+        metrics_explained: {
+          MAPE: 'Error Porcentual Absoluto Medio - mide qué tan lejos están las predicciones en promedio',
+          CV: 'Coeficiente de Variación - mide cuánto varían las ventas día a día',
+          R2: 'Coeficiente de Determinación - qué porcentaje de la variación explica el modelo (bajo es normal en ventas diarias)',
+        },
+      },
       summary: {
         historical_days: dailySeries.length,
         days_with_sales: daysWithData.length,
@@ -468,6 +618,15 @@ export async function GET(request: NextRequest) {
         generated_at: new Date().toISOString(),
         from_cache: usingCache,
         cache_expires_at: projectionsCache ? new Date(projectionsCache.timestamp + CACHE_TTL).toISOString() : null
+      },
+      // NUEVAS MÉTRICAS FINANCIERAS
+      financial: {
+        avg_cost_ratio: Math.round(avgCostRatio * 1000) / 10, // porcentaje
+        avg_margin: Math.round(avgMargin * 1000) / 10, // porcentaje
+        historical_utilidad: historicalUtilidad,
+        projected_utilidad_30d: projectedUtilidad,
+        roi_estimado: avgMargin > 0 ? Math.round((avgMargin / (1 - avgMargin - ML_COMMISSION)) * 1000) / 10 : 0,
+        nota: 'Utilidad estimada basada en margen promedio de productos con costo asignado en Google Sheets',
       }
     };
 

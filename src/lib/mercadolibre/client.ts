@@ -1,7 +1,10 @@
 /**
  * Cliente de API Mercado Libre
  * Maneja autenticación, rate limiting y operaciones principales
+ * Los tokens se persisten automáticamente en Supabase
  */
+
+import { getStoredTokens, saveTokens, isTokenExpiringSoon } from './token-store';
 
 const ML_API_BASE = 'https://api.mercadolibre.com';
 
@@ -19,8 +22,11 @@ class MercadoLibreClient {
   private clientSecret: string;
   private userId: string;
   private expiresAt: number = 0;
+  private initialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor() {
+    // Inicializar con valores de env vars como fallback
     this.accessToken = process.env.ML_ACCESS_TOKEN || '';
     this.refreshToken = process.env.ML_REFRESH_TOKEN || '';
     this.clientId = process.env.ML_CLIENT_ID || '';
@@ -28,10 +34,50 @@ class MercadoLibreClient {
     this.userId = process.env.ML_USER_ID || '';
   }
 
+  // Inicializar tokens desde Supabase (si están disponibles)
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+
+    // Evitar múltiples inicializaciones concurrentes
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = this.loadTokensFromStore();
+    await this.initPromise;
+    this.initialized = true;
+  }
+
+  private async loadTokensFromStore(): Promise<void> {
+    try {
+      const stored = await getStoredTokens();
+
+      if (stored) {
+        this.accessToken = stored.access_token;
+        this.refreshToken = stored.refresh_token;
+        this.expiresAt = new Date(stored.expires_at).getTime();
+
+        // Si el token está por expirar, refrescarlo proactivamente
+        if (isTokenExpiringSoon(stored.expires_at, 30)) {
+          console.log('[ML Client] Token expiring soon, refreshing proactively...');
+          await this.refreshAccessToken();
+        }
+      } else {
+        console.log('[ML Client] No stored tokens, using env vars');
+      }
+    } catch (e) {
+      console.error('[ML Client] Error loading tokens from store:', e);
+    }
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
+    // Asegurar que los tokens están inicializados desde Supabase
+    await this.ensureInitialized();
+
     const url = `${ML_API_BASE}${endpoint}`;
 
     const response = await fetch(url, {
@@ -58,6 +104,8 @@ class MercadoLibreClient {
   }
 
   async refreshAccessToken(): Promise<TokenResponse> {
+    console.log('[ML Client] Refreshing access token...');
+
     const params = new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: this.clientId,
@@ -72,6 +120,8 @@ class MercadoLibreClient {
     });
 
     if (!response.ok) {
+      const errorBody = await response.text().catch(() => 'Unknown error');
+      console.error('[ML Client] Token refresh failed:', response.status, errorBody);
       throw new Error('Failed to refresh ML token');
     }
 
@@ -79,6 +129,14 @@ class MercadoLibreClient {
     this.accessToken = data.access_token;
     this.refreshToken = data.refresh_token;
     this.expiresAt = Date.now() + (data.expires_in * 1000);
+
+    // Guardar tokens actualizados en Supabase
+    const saved = await saveTokens(data.access_token, data.refresh_token, data.expires_in);
+    if (saved) {
+      console.log('[ML Client] New tokens saved to Supabase');
+    } else {
+      console.log('[ML Client] Could not save tokens to Supabase (will use env vars as fallback)');
+    }
 
     return data;
   }

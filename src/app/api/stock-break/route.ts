@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { calcularQuiebreStock, StockBreakProjection } from '@/lib/purchase-orders/generator';
-import { getCostsFromSheet } from '@/lib/google-sheets/client';
+import { getCachedCosts } from '@/lib/google-sheets/costs-cache';
 
 interface StockBreakResponse {
   success: boolean;
@@ -33,8 +33,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<StockBreak
     const umbralAlerta = parseInt(searchParams.get('alerta') || '14');
     const soloUrgentes = searchParams.get('soloUrgentes') === 'true';
 
-    // Obtener costos desde Google Sheets
-    const costs = await getCostsFromSheet();
+    // Obtener costos desde cache centralizado (TTL 15 min)
+    const costs = await getCachedCosts();
 
     if (costs.length === 0) {
       return NextResponse.json({

@@ -12,16 +12,7 @@ import {
   MarginCalculation,
   ProviderSummary,
 } from '@/lib/margins/calculator';
-import { getCostsFromSheet } from '@/lib/google-sheets/client';
-
-// Cache simple en memoria
-let marginsCache: {
-  data: MarginCalculation[];
-  summary: ProviderSummary[];
-  timestamp: number;
-} | null = null;
-
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutos
+import { getCachedCosts, getCacheStatus } from '@/lib/google-sheets/costs-cache';
 
 interface MarginsResponse {
   success: boolean;
@@ -42,25 +33,11 @@ interface MarginsResponse {
 export async function GET(request: NextRequest): Promise<NextResponse<MarginsResponse>> {
   try {
     const { searchParams } = new URL(request.url);
-    const forceRefresh = searchParams.get('refresh') === 'true';
     const limit = parseInt(searchParams.get('limit') || '100');
 
-    // Verificar cache
-    if (!forceRefresh && marginsCache && Date.now() - marginsCache.timestamp < CACHE_TTL) {
-      const limitedData = marginsCache.data.slice(0, limit);
-      return NextResponse.json({
-        success: true,
-        data: {
-          margins: limitedData,
-          summary: marginsCache.summary,
-          totales: calcularTotales(marginsCache.data),
-        },
-        cached: true,
-      });
-    }
-
-    // Obtener costos desde Google Sheets
-    const costs = await getCostsFromSheet();
+    // Obtener costos desde cache centralizado (TTL 15 min)
+    const costs = await getCachedCosts();
+    const cacheStatus = getCacheStatus();
 
     if (costs.length === 0) {
       return NextResponse.json({
@@ -86,13 +63,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<MarginsRes
     const margins = sampleSales.map(sale => calcularMargenes(sale));
     const summary = calcularResumenPorProveedor(margins);
 
-    // Actualizar cache
-    marginsCache = {
-      data: margins,
-      summary,
-      timestamp: Date.now(),
-    };
-
     return NextResponse.json({
       success: true,
       data: {
@@ -100,6 +70,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<MarginsRes
         summary,
         totales: calcularTotales(margins),
       },
+      cached: cacheStatus.valid,
     });
   } catch (error) {
     console.error('Error calculating margins:', error);
