@@ -3,7 +3,7 @@ import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
 import { getCachedCosts, getCostByML, getCostBySku } from '@/lib/google-sheets/costs-cache';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120; // 2 minutes for fetching all products
 
 interface ProductWithSales {
   id: string;
@@ -65,9 +65,30 @@ export async function GET(request: NextRequest) {
     const ml = getMercadoLibreClient();
     const STOCK_THRESHOLD = parseInt(process.env.STOCK_ALERT_THRESHOLD || '5');
 
-    // Get all active products (limit to 200 for performance)
-    const productsResult = await ml.getProductIds('active', 50, 0);
-    const totalProducts = productsResult.paging.total;
+    // Get ALL active products using pagination
+    const allProductIds: string[] = [];
+    let offset = 0;
+    const pageSize = 50;
+    let totalProducts = 0;
+
+    // Paginate through all products
+    while (true) {
+      const productsResult = await ml.getProductIds('active', pageSize, offset);
+      totalProducts = productsResult.paging.total;
+
+      if (productsResult.results.length === 0) break;
+
+      allProductIds.push(...productsResult.results);
+      offset += pageSize;
+
+      // Safety limit to prevent infinite loops (max 500 products)
+      if (offset >= totalProducts || offset >= 500) break;
+
+      // Rate limiting between pages
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    console.log(`[Inventory] Fetched ${allProductIds.length} of ${totalProducts} total products`);
 
     // Cargar costos desde Google Sheets (cache de 15 min)
     let costsMap: Map<string, { costo: number; proveedor: string }> = new Map();
@@ -89,10 +110,9 @@ export async function GET(request: NextRequest) {
     // Get product details in batches
     const products: ProductWithSales[] = [];
     const batchSize = 20;
-    const maxProducts = Math.min(productsResult.results.length, 100);
 
-    for (let i = 0; i < maxProducts; i += batchSize) {
-      const batch = productsResult.results.slice(i, i + batchSize);
+    for (let i = 0; i < allProductIds.length; i += batchSize) {
+      const batch = allProductIds.slice(i, i + batchSize);
       const details = await ml.getProductsDetails(batch);
 
       for (const item of details) {
