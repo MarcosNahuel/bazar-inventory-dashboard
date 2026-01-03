@@ -25,7 +25,7 @@ interface SheetsResponse {
 export async function GET(request: NextRequest): Promise<NextResponse<SheetsResponse>> {
   try {
     const { searchParams } = new URL(request.url);
-    const range = searchParams.get('range') || 'Global!A:G';
+    const range = searchParams.get('range') || 'Global!A:S';
 
     const costs = await getCostsFromSheet(undefined, range);
 

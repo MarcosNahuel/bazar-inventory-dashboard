@@ -44,3 +44,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+bot-base-datos-4a9888eac573.json

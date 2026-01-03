@@ -58,7 +58,7 @@ const MOCK_COSTS: CostData[] = [
  */
 export async function getCostsFromSheet(
   spreadsheetId?: string,
-  range: string = 'Global!A:G'
+  range: string = 'Global!A:S'
 ): Promise<CostData[]> {
   const sheets = getGoogleSheetsClient();
   const sheetId = spreadsheetId || process.env.GOOGLE_SPREADSHEET_ID;
@@ -96,11 +96,19 @@ export async function getCostsFromSheet(
 
       // Mapear a CostData
       if (obj.sku || obj.codigo_ml) {
+        // Parsear costo con formato chileno ($4.550 -> 4550)
+        const rawCosto = String(obj.costo || '0');
+        const cleanCosto = rawCosto
+          .replace(/[$\s]/g, '')  // Remover $ y espacios
+          .replace(/\./g, '')     // Remover puntos (separador de miles)
+          .replace(/,/g, '.');    // Cambiar coma a punto (decimales)
+        const parsedCosto = parseFloat(cleanCosto) || 0;
+
         data.push({
           sku: String(obj.sku || ''),
           codigoML: String(obj.codigo_ml || obj.numero_de_publicacion || ''),
           titulo: String(obj.titulo || obj.titulo_de_publicacion || ''),
-          costo: parseFloat(String(obj.costo || '0')) || 0,
+          costo: parsedCosto,
           proveedor: String(obj.proveedor || 'Sin Proveedor'),
           cajaMaestra: obj.caja_maestra ? parseInt(String(obj.caja_maestra)) : undefined,
           ultimaActualizacion: obj.fecha_actualizacion ? String(obj.fecha_actualizacion) : undefined,
