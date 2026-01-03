@@ -43,6 +43,7 @@ interface InventoryData {
   pareto: {
     top_20_percent_contributes: number;
     total_sales: number;
+    total_utilidad_top20?: number;
     top_products: Array<{
       codigo_ml: string;
       titulo: string;
@@ -50,6 +51,14 @@ interface InventoryData {
       stock: number;
       proveedor: string;
       status?: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
+      // Nuevos campos de rentabilidad
+      precio?: number;
+      costo?: number;
+      comision?: number;
+      utilidad?: number;
+      utilidad_30d?: number;
+      roi?: number;
+      margen?: number;
     }>;
   };
   tickets: {
@@ -615,49 +624,108 @@ export default function Dashboard() {
         {/* Pareto Tab */}
         {activeTab === 'pareto' && inventory?.pareto && (
           <div className="space-y-6">
-            {/* Pareto Summary */}
+            {/* Pareto Summary - Mejorado */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-6 text-white">
               <h3 className="text-xl font-bold mb-2">Análisis Pareto 80/20</h3>
-              <p className="text-blue-100 mb-4">
-                El {20}% de tus productos genera el <span className="text-2xl font-bold">{inventory.pareto.top_20_percent_contributes}%</span> de las ventas
-              </p>
-              <p className="text-sm text-blue-200">
-                Ventas totales 30 días: {inventory.pareto.total_sales.toLocaleString()} unidades
-              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                <div className="bg-white/10 rounded-lg p-4">
+                  <p className="text-blue-200 text-sm">Contribución Top 20%</p>
+                  <p className="text-3xl font-bold">{inventory.pareto.top_20_percent_contributes}%</p>
+                  <p className="text-blue-200 text-xs">de las ventas totales</p>
+                </div>
+                <div className="bg-white/10 rounded-lg p-4">
+                  <p className="text-blue-200 text-sm">Ventas 30 días</p>
+                  <p className="text-3xl font-bold">{inventory.pareto.total_sales.toLocaleString()}</p>
+                  <p className="text-blue-200 text-xs">unidades vendidas</p>
+                </div>
+                <div className="bg-white/10 rounded-lg p-4">
+                  <p className="text-blue-200 text-sm">Utilidad Top 20</p>
+                  <p className="text-3xl font-bold text-green-300">
+                    ${inventory.pareto.total_utilidad_top20
+                      ? (inventory.pareto.total_utilidad_top20 / 1000).toFixed(0) + 'K'
+                      : '---'}
+                  </p>
+                  <p className="text-blue-200 text-xs">ganancia estimada</p>
+                </div>
+              </div>
             </div>
 
-            {/* Top Products */}
+            {/* Top Products - Con Rentabilidad */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b">
                 <h3 className="text-lg font-semibold flex items-center gap-2">
                   <Target className="w-5 h-5 text-blue-600" />
-                  Top 20 Productos (Pareto)
+                  Top 20 Productos - Ventas y Rentabilidad
                 </h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30d</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Stock</th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad/U</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad 30D</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">ROI</th>
+                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {inventory.pareto.top_products.map((p, i) => (
                       <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-6 py-3 text-sm font-bold text-blue-600">{i + 1}</td>
-                        <td className="px-6 py-3">
-                          <p className="text-sm font-medium text-gray-900">{p.titulo}</p>
+                        <td className="px-3 py-3 text-sm font-bold text-blue-600">{i + 1}</td>
+                        <td className="px-3 py-3">
+                          <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{p.titulo}</p>
                           <p className="text-xs text-gray-500">{p.codigo_ml}</p>
                         </td>
-                        <td className="px-6 py-3 text-sm text-gray-600">{p.proveedor}</td>
-                        <td className="px-6 py-3 text-right font-medium text-gray-900">{p.ventas_30d}</td>
-                        <td className="px-6 py-3 text-right text-gray-600">{p.stock}</td>
-                        <td className="px-6 py-3 text-center">
+                        <td className="px-3 py-3 text-right text-sm text-gray-900">
+                          ${p.precio?.toLocaleString() || '---'}
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm">
+                          {p.costo && p.costo > 0 ? (
+                            <span className="text-gray-600">${p.costo.toLocaleString()}</span>
+                          ) : (
+                            <span className="text-orange-500 text-xs">Sin costo</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm">
+                          {p.utilidad && p.utilidad > 0 ? (
+                            <span className="text-green-600 font-medium">${p.utilidad.toLocaleString()}</span>
+                          ) : p.utilidad && p.utilidad < 0 ? (
+                            <span className="text-red-600 font-medium">-${Math.abs(p.utilidad).toLocaleString()}</span>
+                          ) : (
+                            <span className="text-gray-400">---</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right font-medium text-gray-900">{p.ventas_30d}</td>
+                        <td className="px-3 py-3 text-right">
+                          {p.utilidad_30d && p.utilidad_30d > 0 ? (
+                            <span className="text-green-600 font-bold">
+                              ${(p.utilidad_30d / 1000).toFixed(0)}K
+                            </span>
+                          ) : p.utilidad_30d && p.utilidad_30d < 0 ? (
+                            <span className="text-red-600 font-bold">
+                              -${Math.abs(p.utilidad_30d / 1000).toFixed(0)}K
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">---</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          {p.roi && p.roi > 0 ? (
+                            <span className={`font-medium ${p.roi >= 30 ? 'text-green-600' : p.roi >= 15 ? 'text-blue-600' : 'text-gray-600'}`}>
+                              {p.roi}%
+                            </span>
+                          ) : p.roi && p.roi < 0 ? (
+                            <span className="text-red-600 font-medium">{p.roi}%</span>
+                          ) : (
+                            <span className="text-gray-400">---</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-center">
                           <StockStatusIndicator
                             stock={p.stock}
                             ventas30d={p.ventas_30d}

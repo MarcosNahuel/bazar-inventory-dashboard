@@ -187,17 +187,38 @@ export async function GET(request: NextRequest) {
     }
 
     if (analysis === 'full' || analysis === 'pareto') {
-      // Pareto analysis (80/20 rule)
+      // Pareto analysis (80/20 rule) - MEJORADO con rentabilidad
+      const ML_COMMISSION = 0.13; // 13%
+      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '3000');
+
       const sortedBySales = [...products].sort((a, b) => b.ventas_30d - a.ventas_30d);
       const totalSales = sortedBySales.reduce((sum, p) => sum + p.ventas_30d, 0);
       const top20Count = Math.ceil(products.length * 0.2);
       const top20Products = sortedBySales.slice(0, top20Count);
       const top20Sales = top20Products.reduce((sum, p) => sum + p.ventas_30d, 0);
 
+      // Calcular utilidad total de los top 20
+      const top20Utilidad = sortedBySales.slice(0, 20).reduce((sum, p) => {
+        if (p.costo === 0) return sum;
+        const shippingCost = p.logistic_type === 'flex' ? FLEX_SHIPPING_COST : 0;
+        const commission = p.price * ML_COMMISSION;
+        const utilidad = p.price - p.costo - shippingCost - commission;
+        return sum + (utilidad * p.ventas_30d);
+      }, 0);
+
       response.pareto = {
         top_20_percent_contributes: totalSales > 0 ? Math.round((top20Sales / totalSales) * 1000) / 10 : 0,
         total_sales: totalSales,
+        total_utilidad_top20: Math.round(top20Utilidad),
         top_products: sortedBySales.slice(0, 20).map(p => {
+          // Calcular rentabilidad
+          const shippingCost = p.logistic_type === 'flex' ? FLEX_SHIPPING_COST : 0;
+          const commission = Math.round(p.price * ML_COMMISSION);
+          const utilidad = p.costo > 0 ? Math.round(p.price - p.costo - shippingCost - commission) : 0;
+          const utilidad_30d = utilidad * p.ventas_30d;
+          const roi = p.costo > 0 ? Math.round((utilidad / p.costo) * 1000) / 10 : 0;
+          const margen = p.price > 0 && p.costo > 0 ? Math.round((utilidad / p.price) * 1000) / 10 : 0;
+
           // Determinar estado basado en: Stock >= Ventas30D = Saludable
           let status: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
           if (p.stock === 0) {
@@ -218,7 +239,15 @@ export async function GET(request: NextRequest) {
             ventas_30d: p.ventas_30d,
             stock: p.stock,
             proveedor: p.logistic_type,
-            status, // NUEVO: estado del producto
+            status,
+            // NUEVO: datos de rentabilidad
+            precio: p.price,
+            costo: p.costo,
+            comision: commission,
+            utilidad,
+            utilidad_30d: Math.round(utilidad_30d),
+            roi,
+            margen,
           };
         }),
       };
