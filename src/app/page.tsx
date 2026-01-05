@@ -34,6 +34,23 @@ interface Alert {
   thumbnail: string;
 }
 
+interface ParetoProduct {
+  codigo_ml: string;
+  titulo: string;
+  ventas_30d: number;
+  stock: number;
+  proveedor: string;
+  logistic_type?: string;
+  status?: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
+  precio?: number;
+  costo?: number;
+  comision?: number;
+  utilidad?: number;
+  utilidad_30d?: number;
+  roi?: number;
+  margen?: number;
+}
+
 interface InventoryData {
   summary: {
     stock_total: number;
@@ -44,22 +61,34 @@ interface InventoryData {
     top_20_percent_contributes: number;
     total_sales: number;
     total_utilidad_top20?: number;
-    top_products: Array<{
-      codigo_ml: string;
-      titulo: string;
-      ventas_30d: number;
-      stock: number;
-      proveedor: string;
-      status?: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
-      // Nuevos campos de rentabilidad
-      precio?: number;
-      costo?: number;
-      comision?: number;
-      utilidad?: number;
-      utilidad_30d?: number;
-      roi?: number;
-      margen?: number;
-    }>;
+    total_utilidad?: number;
+    total_products_with_sales?: number;
+    // 3 pestañas de Pareto
+    by_sales?: {
+      title: string;
+      description: string;
+      contribution_percent: number;
+      products_count: number;
+      total_sales: number;
+      top_products: Array<ParetoProduct>;
+    };
+    by_utilidad?: {
+      title: string;
+      description: string;
+      contribution_percent: number;
+      products_count: number;
+      total_utilidad: number;
+      top_products: Array<ParetoProduct>;
+    };
+    by_roi?: {
+      title: string;
+      description: string;
+      avg_roi: number;
+      products_count: number;
+      top_products: Array<ParetoProduct>;
+    };
+    // Retrocompatibilidad
+    top_products: Array<ParetoProduct>;
   };
   tickets: {
     avg_ticket: number;
@@ -82,8 +111,20 @@ interface InventoryData {
       days: number;
       status: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
       price: number;
+      valorizacion: number;
+      proveedor: string;
       logistic_type: string;
+      costo: number;
     }>;
+  };
+  logistics_distribution?: {
+    flex: { name: string; productos: number; stock_total: number; ventas_30d: number; valorizacion: number; necesita_reposicion: number };
+    full: { name: string; productos: number; stock_total: number; ventas_30d: number; valorizacion: number; necesita_reposicion: number };
+    other: { name: string; productos: number; stock_total: number; ventas_30d: number; valorizacion: number };
+    products_to_restock: {
+      flex: Array<{ codigo_ml: string; titulo: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
+      full: Array<{ codigo_ml: string; titulo: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
+    };
   };
   suppliers: Array<{
     proveedor: string;
@@ -199,7 +240,213 @@ interface ProjectionsData {
   };
 }
 
-type TabType = 'overview' | 'inventory' | 'pareto' | 'costs' | 'alerts' | 'projections' | 'coming-soon';
+type TabType = 'overview' | 'inventory' | 'pareto' | 'costs' | 'alerts' | 'projections' | 'monitor' | 'coming-soon';
+
+// Tipos para Monitor Mensual
+interface MonthlyMonitorData {
+  period: {
+    month: string;
+    start_date: string;
+    end_date: string;
+    days_count: number;
+  };
+  summary: {
+    total_ventas: number;
+    total_facturacion: number;
+    total_comisiones: number;
+    total_costos_envio: number;
+    total_ingreso_neto: number;
+    total_costo_productos: number;
+    total_utilidad: number;
+    roi_promedio: number;
+    rentabilidad: number;
+  };
+  daily: Array<{
+    date: string;
+    ventas_count: number;
+    facturacion: number;
+    comisiones: number;
+    costos_envio: number;
+    ingreso_neto: number;
+    costo_productos: number;
+    utilidad: number;
+  }>;
+  by_provider: Array<{
+    proveedor: string;
+    facturacion: number;
+    ingreso_neto: number;
+    utilidad: number;
+    ventas_count: number;
+    rentabilidad: number;
+  }>;
+}
+
+// Componente ParetoSection con 3 sub-pestañas
+function ParetoSection({ pareto }: { pareto: InventoryData['pareto'] }) {
+  const [subTab, setSubTab] = useState<'ventas' | 'utilidad' | 'roi'>('ventas');
+
+  // Función para renderizar la tabla de productos
+  const renderProductsTable = (products: ParetoProduct[], highlightColumn: 'ventas' | 'utilidad' | 'roi') => (
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
+            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
+            <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo</th>
+            <th className={`px-3 py-3 text-right text-xs font-medium uppercase ${highlightColumn === 'ventas' ? 'text-blue-600 bg-blue-50' : 'text-gray-500'}`}>Ventas</th>
+            <th className={`px-3 py-3 text-right text-xs font-medium uppercase ${highlightColumn === 'utilidad' ? 'text-green-600 bg-green-50' : 'text-gray-500'}`}>Utilidad 30D</th>
+            <th className={`px-3 py-3 text-right text-xs font-medium uppercase ${highlightColumn === 'roi' ? 'text-purple-600 bg-purple-50' : 'text-gray-500'}`}>ROI</th>
+            <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {products.map((p, i) => (
+            <tr key={i} className="hover:bg-gray-50">
+              <td className="px-3 py-3 text-sm font-bold text-blue-600">{i + 1}</td>
+              <td className="px-3 py-3">
+                <p className="text-sm font-medium text-gray-900 truncate max-w-[180px]">{p.titulo}</p>
+                <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+              </td>
+              <td className="px-3 py-3 text-xs text-gray-600">{p.proveedor || 'Sin asignar'}</td>
+              <td className="px-3 py-3 text-right text-sm text-gray-900">
+                ${p.precio?.toLocaleString() || '---'}
+              </td>
+              <td className="px-3 py-3 text-right text-sm">
+                {p.costo && p.costo > 0 ? (
+                  <span className="text-gray-600">${p.costo.toLocaleString()}</span>
+                ) : (
+                  <span className="text-orange-500 text-xs">Sin costo</span>
+                )}
+              </td>
+              <td className={`px-3 py-3 text-right font-medium ${highlightColumn === 'ventas' ? 'text-blue-700 bg-blue-50' : 'text-gray-900'}`}>
+                {p.ventas_30d}
+              </td>
+              <td className={`px-3 py-3 text-right ${highlightColumn === 'utilidad' ? 'bg-green-50' : ''}`}>
+                {p.utilidad_30d && p.utilidad_30d > 0 ? (
+                  <span className="text-green-600 font-bold">${(p.utilidad_30d / 1000).toFixed(0)}K</span>
+                ) : p.utilidad_30d && p.utilidad_30d < 0 ? (
+                  <span className="text-red-600 font-bold">-${Math.abs(p.utilidad_30d / 1000).toFixed(0)}K</span>
+                ) : (
+                  <span className="text-gray-400">---</span>
+                )}
+              </td>
+              <td className={`px-3 py-3 text-right ${highlightColumn === 'roi' ? 'bg-purple-50' : ''}`}>
+                {p.roi && p.roi > 0 ? (
+                  <span className={`font-medium ${p.roi >= 30 ? 'text-green-600' : p.roi >= 15 ? 'text-purple-600' : 'text-gray-600'}`}>
+                    {p.roi}%
+                  </span>
+                ) : p.roi && p.roi < 0 ? (
+                  <span className="text-red-600 font-medium">{p.roi}%</span>
+                ) : (
+                  <span className="text-gray-400">---</span>
+                )}
+              </td>
+              <td className="px-3 py-3 text-center">
+                <StockStatusIndicator stock={p.stock} ventas30d={p.ventas_30d} statusOverride={p.status} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Pareto Summary */}
+      <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-6 text-white">
+        <h3 className="text-xl font-bold mb-2">Análisis Pareto 80/20</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+          <div className="bg-white/10 rounded-lg p-4">
+            <p className="text-blue-200 text-sm">Contribución Top 20%</p>
+            <p className="text-3xl font-bold">{pareto.top_20_percent_contributes}%</p>
+            <p className="text-blue-200 text-xs">de las ventas totales</p>
+          </div>
+          <div className="bg-white/10 rounded-lg p-4">
+            <p className="text-blue-200 text-sm">Ventas 30 días</p>
+            <p className="text-3xl font-bold">{pareto.total_sales.toLocaleString()}</p>
+            <p className="text-blue-200 text-xs">unidades vendidas</p>
+          </div>
+          <div className="bg-white/10 rounded-lg p-4">
+            <p className="text-blue-200 text-sm">Utilidad Total</p>
+            <p className="text-3xl font-bold text-green-300">
+              ${pareto.total_utilidad ? (pareto.total_utilidad / 1000).toFixed(0) + 'K' : '---'}
+            </p>
+            <p className="text-blue-200 text-xs">ganancia estimada</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-tabs para las 3 vistas */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Target className="w-5 h-5 text-blue-600" />
+              Análisis por Criterio
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSubTab('ventas')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  subTab === 'ventas'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Por Ventas
+              </button>
+              <button
+                onClick={() => setSubTab('utilidad')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  subTab === 'utilidad'
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Por Utilidad
+              </button>
+              <button
+                onClick={() => setSubTab('roi')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  subTab === 'roi'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Por ROI
+              </button>
+            </div>
+          </div>
+
+          {/* Descripción de la pestaña activa */}
+          <div className="mt-3 text-sm text-gray-500">
+            {subTab === 'ventas' && pareto.by_sales && (
+              <p>{pareto.by_sales.description} - <strong>{pareto.by_sales.products_count} productos</strong> generan el {pareto.by_sales.contribution_percent}% de las ventas</p>
+            )}
+            {subTab === 'utilidad' && pareto.by_utilidad && (
+              <p>{pareto.by_utilidad.description} - <strong>{pareto.by_utilidad.products_count} productos</strong> generan el {pareto.by_utilidad.contribution_percent}% de la utilidad</p>
+            )}
+            {subTab === 'roi' && pareto.by_roi && (
+              <p>{pareto.by_roi.description} - ROI promedio: <strong>{pareto.by_roi.avg_roi}%</strong></p>
+            )}
+          </div>
+        </div>
+
+        {/* Contenido de cada sub-tab */}
+        {subTab === 'ventas' && pareto.by_sales && renderProductsTable(pareto.by_sales.top_products, 'ventas')}
+        {subTab === 'utilidad' && pareto.by_utilidad && renderProductsTable(pareto.by_utilidad.top_products, 'utilidad')}
+        {subTab === 'roi' && pareto.by_roi && renderProductsTable(pareto.by_roi.top_products, 'roi')}
+
+        {/* Fallback si no hay datos de las nuevas pestañas */}
+        {!pareto.by_sales && !pareto.by_utilidad && !pareto.by_roi && renderProductsTable(pareto.top_products, 'ventas')}
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -208,6 +455,8 @@ export default function Dashboard() {
   const [inventory, setInventory] = useState<InventoryData | null>(null);
   const [projections, setProjections] = useState<ProjectionsData | null>(null);
   const [projectionsLoading, setProjectionsLoading] = useState(false);
+  const [monthlyMonitor, setMonthlyMonitor] = useState<MonthlyMonitorData | null>(null);
+  const [monitorLoading, setMonitorLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -298,11 +547,30 @@ export default function Dashboard() {
     }
   };
 
+  const fetchMonthlyMonitor = async () => {
+    if (monthlyMonitor) return; // Already loaded
+    setMonitorLoading(true);
+    try {
+      const res = await fetch('/api/monthly-monitor');
+      if (res.ok) {
+        const data = await res.json();
+        setMonthlyMonitor(data);
+      }
+    } catch (err) {
+      console.error('Error loading monthly monitor:', err);
+    } finally {
+      setMonitorLoading(false);
+    }
+  };
+
   useEffect(() => { fetchData(); }, []);
 
   useEffect(() => {
     if (activeTab === 'projections' && !projections && !projectionsLoading) {
       fetchProjections();
+    }
+    if (activeTab === 'monitor' && !monthlyMonitor && !monitorLoading) {
+      fetchMonthlyMonitor();
     }
   }, [activeTab]);
 
@@ -324,6 +592,7 @@ export default function Dashboard() {
     { id: 'costs', label: 'Costos', icon: FileSpreadsheet },
     { id: 'alerts', label: 'Alertas', icon: AlertTriangle },
     { id: 'projections', label: 'Proyecciones', icon: LineChart },
+    { id: 'monitor', label: 'Monitor', icon: BarChart3 },
     { id: 'coming-soon', label: 'Próximamente', icon: Rocket },
   ];
 
@@ -530,11 +799,11 @@ export default function Dashboard() {
           <div className="space-y-6">
             {/* Explicación del Criterio */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <h4 className="font-semibold text-blue-800 mb-2">📊 Criterio de Salud de Stock</h4>
+              <h4 className="font-semibold text-blue-800 mb-2">Criterio de Salud de Stock</h4>
               <p className="text-sm text-blue-700">
-                <strong>Saludable:</strong> Stock ≥ Ventas30D (cubre el próximo mes) |
+                <strong>Saludable:</strong> Stock mayor o igual a Ventas30D (cubre el próximo mes) |
                 <strong> Alerta:</strong> Stock entre 50%-100% de Ventas30D |
-                <strong> Crítico:</strong> Stock &lt; 50% de Ventas30D
+                <strong> Crítico:</strong> Stock menor a 50% de Ventas30D
               </p>
             </div>
 
@@ -547,6 +816,58 @@ export default function Dashboard() {
               <HealthCard title="Sobrestock" value={inventory.stock_health.overstocked} color="purple" />
             </div>
 
+            {/* Distribución FLEX vs FULL */}
+            {inventory.logistics_distribution && (
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                  <Boxes className="w-5 h-5 text-indigo-600" />
+                  Distribución por Modalidad de Envío
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* FLEX Card */}
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+                    <h4 className="font-semibold text-blue-800">{inventory.logistics_distribution.flex.name}</h4>
+                    <div className="mt-2 space-y-1 text-sm">
+                      <p className="text-blue-700">Productos: <span className="font-bold">{inventory.logistics_distribution.flex.productos}</span></p>
+                      <p className="text-blue-700">Stock: <span className="font-bold">{inventory.logistics_distribution.flex.stock_total.toLocaleString()}</span></p>
+                      <p className="text-blue-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.flex.ventas_30d}</span></p>
+                      <p className="text-blue-700">Valorización: <span className="font-bold">${inventory.logistics_distribution.flex.valorizacion.toLocaleString()}</span></p>
+                      {inventory.logistics_distribution.flex.necesita_reposicion > 0 && (
+                        <p className="text-red-600 font-semibold mt-2">
+                          Reponer: {inventory.logistics_distribution.flex.necesita_reposicion} productos
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {/* FULL Card */}
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+                    <h4 className="font-semibold text-green-800">{inventory.logistics_distribution.full.name}</h4>
+                    <div className="mt-2 space-y-1 text-sm">
+                      <p className="text-green-700">Productos: <span className="font-bold">{inventory.logistics_distribution.full.productos}</span></p>
+                      <p className="text-green-700">Stock: <span className="font-bold">{inventory.logistics_distribution.full.stock_total.toLocaleString()}</span></p>
+                      <p className="text-green-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.full.ventas_30d}</span></p>
+                      <p className="text-green-700">Valorización: <span className="font-bold">${inventory.logistics_distribution.full.valorizacion.toLocaleString()}</span></p>
+                      {inventory.logistics_distribution.full.necesita_reposicion > 0 && (
+                        <p className="text-red-600 font-semibold mt-2">
+                          Reponer: {inventory.logistics_distribution.full.necesita_reposicion} productos
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Otros Card */}
+                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
+                    <h4 className="font-semibold text-gray-800">{inventory.logistics_distribution.other.name}</h4>
+                    <div className="mt-2 space-y-1 text-sm">
+                      <p className="text-gray-700">Productos: <span className="font-bold">{inventory.logistics_distribution.other.productos}</span></p>
+                      <p className="text-gray-700">Stock: <span className="font-bold">{inventory.logistics_distribution.other.stock_total.toLocaleString()}</span></p>
+                      <p className="text-gray-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.other.ventas_30d}</span></p>
+                      <p className="text-gray-700">Valorización: <span className="font-bold">${inventory.logistics_distribution.other.valorizacion.toLocaleString()}</span></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* TODOS los productos */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b">
@@ -555,20 +876,23 @@ export default function Dashboard() {
                   Todos los Productos ({inventory.stock_health.all_products?.length || 0})
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  Ordenados por estado de urgencia (críticos primero)
+                  Ordenados por estado de urgencia (críticos primero). Incluye proveedor y valorización.
                 </p>
               </div>
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Stock</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Días Stock</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
+                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Tipo</th>
+                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Stock</th>
+                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
+                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Días</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valorización</th>
+                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -579,9 +903,20 @@ export default function Dashboard() {
                         item.status === 'out_of_stock' ? 'bg-gray-100' :
                         ''
                       }`}>
-                        <td className="px-4 py-3 text-sm text-gray-500 font-mono">{item.codigo_ml}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{item.titulo}</td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.codigo_ml}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900 max-w-[200px] truncate">{item.titulo}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600">{item.proveedor || 'Sin asignar'}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            item.logistic_type === 'self_service' ? 'bg-blue-100 text-blue-800' :
+                            item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {item.logistic_type === 'self_service' ? 'FLEX' :
+                             item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center">
                           <span className={`px-2 py-1 rounded text-sm font-medium ${
                             item.stock === 0 ? 'bg-gray-200 text-gray-600' :
                             item.stock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
@@ -591,21 +926,24 @@ export default function Dashboard() {
                             {item.stock}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center text-sm text-gray-600">{item.ventas_30d}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        <td className="px-3 py-2 text-center text-sm text-gray-600">{item.ventas_30d}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                             item.days <= 7 ? 'bg-red-100 text-red-800' :
                             item.days <= 30 ? 'bg-yellow-100 text-yellow-800' :
                             item.days > 90 ? 'bg-purple-100 text-purple-800' :
                             'bg-green-100 text-green-800'
                           }`}>
-                            {item.days === 999 ? '∞' : `${item.days}d`}
+                            {item.days === 999 ? 'Inf' : `${item.days}d`}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right text-sm text-gray-900">
+                        <td className="px-3 py-2 text-right text-sm text-gray-900">
                           ${item.price.toLocaleString()}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-2 text-right text-sm text-gray-600">
+                          ${item.valorizacion?.toLocaleString() || 0}
+                        </td>
+                        <td className="px-3 py-2 text-center">
                           <StockStatusIndicator
                             stock={item.stock}
                             ventas30d={item.ventas_30d}
@@ -621,124 +959,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Pareto Tab */}
+        {/* Pareto Tab - Con 3 Sub-pestañas */}
         {activeTab === 'pareto' && inventory?.pareto && (
-          <div className="space-y-6">
-            {/* Pareto Summary - Mejorado */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-6 text-white">
-              <h3 className="text-xl font-bold mb-2">Análisis Pareto 80/20</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                <div className="bg-white/10 rounded-lg p-4">
-                  <p className="text-blue-200 text-sm">Contribución Top 20%</p>
-                  <p className="text-3xl font-bold">{inventory.pareto.top_20_percent_contributes}%</p>
-                  <p className="text-blue-200 text-xs">de las ventas totales</p>
-                </div>
-                <div className="bg-white/10 rounded-lg p-4">
-                  <p className="text-blue-200 text-sm">Ventas 30 días</p>
-                  <p className="text-3xl font-bold">{inventory.pareto.total_sales.toLocaleString()}</p>
-                  <p className="text-blue-200 text-xs">unidades vendidas</p>
-                </div>
-                <div className="bg-white/10 rounded-lg p-4">
-                  <p className="text-blue-200 text-sm">Utilidad Top 20</p>
-                  <p className="text-3xl font-bold text-green-300">
-                    ${inventory.pareto.total_utilidad_top20
-                      ? (inventory.pareto.total_utilidad_top20 / 1000).toFixed(0) + 'K'
-                      : '---'}
-                  </p>
-                  <p className="text-blue-200 text-xs">ganancia estimada</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Top Products - Con Rentabilidad */}
-            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <Target className="w-5 h-5 text-blue-600" />
-                  Top 20 Productos - Ventas y Rentabilidad
-                </h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad/U</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad 30D</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">ROI</th>
-                      <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {inventory.pareto.top_products.map((p, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-3 text-sm font-bold text-blue-600">{i + 1}</td>
-                        <td className="px-3 py-3">
-                          <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{p.titulo}</p>
-                          <p className="text-xs text-gray-500">{p.codigo_ml}</p>
-                        </td>
-                        <td className="px-3 py-3 text-right text-sm text-gray-900">
-                          ${p.precio?.toLocaleString() || '---'}
-                        </td>
-                        <td className="px-3 py-3 text-right text-sm">
-                          {p.costo && p.costo > 0 ? (
-                            <span className="text-gray-600">${p.costo.toLocaleString()}</span>
-                          ) : (
-                            <span className="text-orange-500 text-xs">Sin costo</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-right text-sm">
-                          {p.utilidad && p.utilidad > 0 ? (
-                            <span className="text-green-600 font-medium">${p.utilidad.toLocaleString()}</span>
-                          ) : p.utilidad && p.utilidad < 0 ? (
-                            <span className="text-red-600 font-medium">-${Math.abs(p.utilidad).toLocaleString()}</span>
-                          ) : (
-                            <span className="text-gray-400">---</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-right font-medium text-gray-900">{p.ventas_30d}</td>
-                        <td className="px-3 py-3 text-right">
-                          {p.utilidad_30d && p.utilidad_30d > 0 ? (
-                            <span className="text-green-600 font-bold">
-                              ${(p.utilidad_30d / 1000).toFixed(0)}K
-                            </span>
-                          ) : p.utilidad_30d && p.utilidad_30d < 0 ? (
-                            <span className="text-red-600 font-bold">
-                              -${Math.abs(p.utilidad_30d / 1000).toFixed(0)}K
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">---</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          {p.roi && p.roi > 0 ? (
-                            <span className={`font-medium ${p.roi >= 30 ? 'text-green-600' : p.roi >= 15 ? 'text-blue-600' : 'text-gray-600'}`}>
-                              {p.roi}%
-                            </span>
-                          ) : p.roi && p.roi < 0 ? (
-                            <span className="text-red-600 font-medium">{p.roi}%</span>
-                          ) : (
-                            <span className="text-gray-400">---</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          <StockStatusIndicator
-                            stock={p.stock}
-                            ventas30d={p.ventas_30d}
-                            statusOverride={p.status}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+          <ParetoSection pareto={inventory.pareto} />
         )}
 
         {/* Costs Tab */}
@@ -1348,6 +1571,179 @@ export default function Dashboard() {
                 >
                   Reintentar
                 </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Monitor Tab */}
+        {activeTab === 'monitor' && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl p-6 text-white">
+              <div className="flex items-center gap-3 mb-2">
+                <BarChart3 className="w-8 h-8" />
+                <h2 className="text-2xl font-bold">Monitor del Negocio Mensual</h2>
+              </div>
+              <p className="text-emerald-100">
+                Resumen financiero completo con detalle por proveedor, ingresos, utilidad y ROI
+              </p>
+            </div>
+
+            {monitorLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="w-8 h-8 animate-spin text-emerald-600" />
+                <span className="ml-2 text-gray-600">Cargando datos del mes...</span>
+              </div>
+            ) : monthlyMonitor ? (
+              <>
+                {/* Period Info */}
+                <div className="bg-white rounded-xl shadow-sm p-4">
+                  <p className="text-sm text-gray-600">
+                    Periodo: <strong>{monthlyMonitor.period.start_date}</strong> al <strong>{monthlyMonitor.period.end_date}</strong>
+                    {' '}({monthlyMonitor.period.days_count} dias con ventas)
+                  </p>
+                </div>
+
+                {/* KPIs Summary */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-xl shadow-sm p-4">
+                    <p className="text-xs text-gray-500 uppercase">Ventas Totales</p>
+                    <p className="text-2xl font-bold text-gray-900">{monthlyMonitor.summary.total_ventas.toLocaleString()}</p>
+                    <p className="text-xs text-gray-400">unidades</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-4">
+                    <p className="text-xs text-gray-500 uppercase">Facturacion</p>
+                    <p className="text-2xl font-bold text-blue-600">${(monthlyMonitor.summary.total_facturacion / 1000000).toFixed(1)}M</p>
+                    <p className="text-xs text-gray-400">bruto</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-4">
+                    <p className="text-xs text-gray-500 uppercase">Utilidad</p>
+                    <p className="text-2xl font-bold text-green-600">${(monthlyMonitor.summary.total_utilidad / 1000).toFixed(0)}K</p>
+                    <p className="text-xs text-gray-400">neto</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm p-4">
+                    <p className="text-xs text-gray-500 uppercase">Rentabilidad</p>
+                    <p className="text-2xl font-bold text-purple-600">{monthlyMonitor.summary.rentabilidad}%</p>
+                    <p className="text-xs text-gray-400">ROI: {monthlyMonitor.summary.roi_promedio}%</p>
+                  </div>
+                </div>
+
+                {/* Desglose de Costos */}
+                <div className="bg-white rounded-xl shadow-sm p-6">
+                  <h3 className="text-lg font-semibold mb-4">Desglose Financiero</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="text-center p-3 bg-blue-50 rounded-lg">
+                      <p className="text-xs text-blue-600">Facturacion</p>
+                      <p className="text-lg font-bold">${monthlyMonitor.summary.total_facturacion.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-3 bg-orange-50 rounded-lg">
+                      <p className="text-xs text-orange-600">Comisiones ML</p>
+                      <p className="text-lg font-bold">-${monthlyMonitor.summary.total_comisiones.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-3 bg-yellow-50 rounded-lg">
+                      <p className="text-xs text-yellow-600">Costos Envio</p>
+                      <p className="text-lg font-bold">-${monthlyMonitor.summary.total_costos_envio.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-3 bg-gray-50 rounded-lg">
+                      <p className="text-xs text-gray-600">Costo Productos</p>
+                      <p className="text-lg font-bold">-${monthlyMonitor.summary.total_costo_productos.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-3 bg-green-50 rounded-lg">
+                      <p className="text-xs text-green-600">Utilidad Neta</p>
+                      <p className="text-lg font-bold text-green-700">${monthlyMonitor.summary.total_utilidad.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resumen por Proveedor */}
+                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b">
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                      <Users className="w-5 h-5 text-emerald-600" />
+                      Resumen por Proveedor
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Facturacion</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingreso Neto</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rentabilidad</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {monthlyMonitor.by_provider.map((prov, i) => (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-bold text-emerald-600">{i + 1}</td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{prov.proveedor}</td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">${prov.facturacion.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">${prov.ingreso_neto.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right text-sm font-medium text-green-600">${prov.utilidad.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right text-sm text-gray-600">{prov.ventas_count}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                prov.rentabilidad >= 20 ? 'bg-green-100 text-green-800' :
+                                prov.rentabilidad >= 10 ? 'bg-blue-100 text-blue-800' :
+                                prov.rentabilidad >= 0 ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {prov.rentabilidad}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Resumen Diario */}
+                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b">
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-emerald-600" />
+                      Tendencia Diaria
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto max-h-[400px]">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Facturacion</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Comisiones</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Envio</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo Prod.</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {monthlyMonitor.daily.map((day, i) => (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-4 py-2 text-sm text-gray-900">{day.date}</td>
+                            <td className="px-4 py-2 text-right text-sm text-gray-600">{day.ventas_count}</td>
+                            <td className="px-4 py-2 text-right text-sm text-blue-600">${day.facturacion.toLocaleString()}</td>
+                            <td className="px-4 py-2 text-right text-sm text-orange-500">-${day.comisiones.toLocaleString()}</td>
+                            <td className="px-4 py-2 text-right text-sm text-yellow-600">-${day.costos_envio.toLocaleString()}</td>
+                            <td className="px-4 py-2 text-right text-sm text-gray-500">-${day.costo_productos.toLocaleString()}</td>
+                            <td className="px-4 py-2 text-right text-sm font-medium text-green-600">${day.utilidad.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                No se pudieron cargar los datos del monitor mensual
               </div>
             )}
           </div>

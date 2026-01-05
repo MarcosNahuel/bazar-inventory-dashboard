@@ -21,8 +21,10 @@ interface ProductWithSales {
 }
 
 // Helper to get all sales aggregated by product ID
+// Also returns product info for items that had sales (for stock-zero products)
 async function getSalesById(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number) {
   const salesById: Record<string, { quantity: number; amount: number }> = {};
+  const productInfoFromSales: Record<string, { title: string; price: number; sku: string | null }> = {};
 
   // Get orders using pagination - up to 2000 orders for accuracy
   const orders = await ml.getAllOrders(daysBack);
@@ -42,6 +44,15 @@ async function getSalesById(ml: ReturnType<typeof getMercadoLibreClient>, daysBa
       salesById[itemId].quantity += item.quantity;
       salesById[itemId].amount += item.quantity * item.unit_price;
 
+      // Store product info for items with sales (used for stock-zero products)
+      if (!productInfoFromSales[itemId]) {
+        productInfoFromSales[itemId] = {
+          title: item.item.title,
+          price: item.unit_price,
+          sku: sku || null,
+        };
+      }
+
       // Also store by SKU if available
       if (sku) {
         if (!salesById[sku]) {
@@ -53,7 +64,7 @@ async function getSalesById(ml: ReturnType<typeof getMercadoLibreClient>, daysBa
     }
   }
 
-  return salesById;
+  return { salesById, productInfoFromSales };
 }
 
 // GET /api/inventory - Get complete inventory analysis from ML API
@@ -147,13 +158,17 @@ export async function GET(request: NextRequest) {
 
     // Get sales data for last 30 days - using optimized method
     let salesById: Record<string, { quantity: number; amount: number }> = {};
+    let productInfoFromSales: Record<string, { title: string; price: number; sku: string | null }> = {};
     try {
-      salesById = await getSalesById(ml, 30);
+      const salesData = await getSalesById(ml, 30);
+      salesById = salesData.salesById;
+      productInfoFromSales = salesData.productInfoFromSales;
     } catch (e) {
       console.error('Error fetching sales:', e);
     }
 
     // Merge sales data with products - check by ID first (most reliable)
+    const productIds = new Set(products.map(p => p.id));
     for (const product of products) {
       // Check by product ID (MLC...)
       if (salesById[product.id]) {
@@ -165,6 +180,44 @@ export async function GET(request: NextRequest) {
         product.ventas_30d = salesById[product.sku].quantity;
         product.revenue_30d = salesById[product.sku].amount;
       }
+    }
+
+    // NUEVO: Agregar productos con ventas que no están en la lista de productos activos
+    // Esto incluye productos con stock cero o pausados que tuvieron ventas en los últimos 30 días
+    for (const [itemId, salesData] of Object.entries(salesById)) {
+      // Solo procesar IDs de ML (MLC...), no SKUs
+      if (!itemId.startsWith('MLC')) continue;
+      // Si ya está en la lista de productos, saltar
+      if (productIds.has(itemId)) continue;
+      // Si no tiene ventas, saltar
+      if (salesData.quantity === 0) continue;
+
+      // Obtener info del producto desde las ventas
+      const productInfo = productInfoFromSales[itemId];
+      if (!productInfo) continue;
+
+      // Buscar costo del producto
+      const costByMl = costsMap.get(itemId.toLowerCase());
+      const costBySku = productInfo.sku ? costsMap.get(productInfo.sku.toLowerCase()) : null;
+      const costData = costByMl || costBySku || { costo: 0, proveedor: 'Sin asignar' };
+
+      // Agregar producto con stock cero
+      products.push({
+        id: itemId,
+        title: productInfo.title || 'Producto sin stock',
+        sku: productInfo.sku,
+        price: productInfo.price,
+        stock: 0, // Stock cero
+        status: 'paused', // Probablemente pausado por falta de stock
+        category_id: '',
+        logistic_type: 'unknown',
+        ventas_30d: salesData.quantity,
+        revenue_30d: salesData.amount,
+        costo: costData.costo,
+        proveedor: costData.proveedor,
+      });
+
+      console.log(`[Inventory] Added stock-zero product: ${itemId} with ${salesData.quantity} sales in 30D`);
     }
 
     // Build response based on analysis type
@@ -187,69 +240,130 @@ export async function GET(request: NextRequest) {
     }
 
     if (analysis === 'full' || analysis === 'pareto') {
-      // Pareto analysis (80/20 rule) - MEJORADO con rentabilidad
+      // Pareto analysis (80/20 rule) - MEJORADO con 3 análisis: Ventas, Utilidad, ROI
       const ML_COMMISSION = 0.13; // 13%
-      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '3000');
+      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990'); // $2,990 por envío FLEX
 
-      const sortedBySales = [...products].sort((a, b) => b.ventas_30d - a.ventas_30d);
+      // Función helper para calcular datos de un producto
+      const calcProductData = (p: ProductWithSales) => {
+        const shippingCost = p.logistic_type === 'self_service' ? FLEX_SHIPPING_COST : 0;
+        const commission = Math.round(p.price * ML_COMMISSION);
+        const utilidad = p.costo > 0 ? Math.round(p.price - p.costo - shippingCost - commission) : 0;
+        const utilidad_30d = utilidad * p.ventas_30d;
+        const roi = p.costo > 0 ? Math.round((utilidad / p.costo) * 1000) / 10 : 0;
+        const margen = p.price > 0 && p.costo > 0 ? Math.round((utilidad / p.price) * 1000) / 10 : 0;
+
+        // Determinar estado
+        let status: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
+        if (p.stock === 0) {
+          status = 'out_of_stock';
+        } else if (p.stock > p.ventas_30d * 3 && p.ventas_30d > 0) {
+          status = 'overstocked';
+        } else if (p.stock >= p.ventas_30d) {
+          status = 'healthy';
+        } else if (p.stock >= p.ventas_30d * 0.5) {
+          status = 'warning';
+        } else {
+          status = 'critical';
+        }
+
+        return {
+          codigo_ml: p.id,
+          titulo: p.title.substring(0, 50),
+          ventas_30d: p.ventas_30d,
+          stock: p.stock,
+          proveedor: p.proveedor,
+          logistic_type: p.logistic_type,
+          status,
+          precio: p.price,
+          costo: p.costo,
+          comision: commission,
+          utilidad,
+          utilidad_30d: Math.round(utilidad_30d),
+          roi,
+          margen,
+        };
+      };
+
+      // Calcular datos para todos los productos con ventas
+      const productsWithData = products
+        .filter(p => p.ventas_30d > 0)
+        .map(p => ({ ...p, ...calcProductData(p) }));
+
+      // === PARETO POR VENTAS ===
+      const sortedBySales = [...productsWithData].sort((a, b) => b.ventas_30d - a.ventas_30d);
       const totalSales = sortedBySales.reduce((sum, p) => sum + p.ventas_30d, 0);
-      const top20Count = Math.ceil(products.length * 0.2);
-      const top20Products = sortedBySales.slice(0, top20Count);
-      const top20Sales = top20Products.reduce((sum, p) => sum + p.ventas_30d, 0);
 
-      // Calcular utilidad total de los top 20
-      const top20Utilidad = sortedBySales.slice(0, 20).reduce((sum, p) => {
-        if (p.costo === 0) return sum;
-        const shippingCost = p.logistic_type === 'flex' ? FLEX_SHIPPING_COST : 0;
-        const commission = p.price * ML_COMMISSION;
-        const utilidad = p.price - p.costo - shippingCost - commission;
-        return sum + (utilidad * p.ventas_30d);
-      }, 0);
+      // Encontrar productos que representan 80% de las ventas
+      let cumSales = 0;
+      const top80SalesProducts = sortedBySales.filter(p => {
+        if (cumSales >= totalSales * 0.8) return false;
+        cumSales += p.ventas_30d;
+        return true;
+      });
+      const top80SalesContrib = Math.round((cumSales / totalSales) * 1000) / 10;
+
+      // === PARETO POR UTILIDAD ===
+      const productsWithUtilidad = productsWithData.filter(p => p.utilidad_30d > 0);
+      const sortedByUtilidad = [...productsWithUtilidad].sort((a, b) => b.utilidad_30d - a.utilidad_30d);
+      const totalUtilidad = sortedByUtilidad.reduce((sum, p) => sum + p.utilidad_30d, 0);
+
+      let cumUtilidad = 0;
+      const top80UtilidadProducts = sortedByUtilidad.filter(p => {
+        if (cumUtilidad >= totalUtilidad * 0.8) return false;
+        cumUtilidad += p.utilidad_30d;
+        return true;
+      });
+      const top80UtilidadContrib = totalUtilidad > 0 ? Math.round((cumUtilidad / totalUtilidad) * 1000) / 10 : 0;
+
+      // === PARETO POR ROI ===
+      const productsWithROI = productsWithData.filter(p => p.roi > 0 && p.costo > 0);
+      const sortedByROI = [...productsWithROI].sort((a, b) => b.roi - a.roi);
+      // Para ROI, tomamos los que tienen ROI > promedio (los más eficientes)
+      const avgROI = productsWithROI.length > 0
+        ? productsWithROI.reduce((sum, p) => sum + p.roi, 0) / productsWithROI.length
+        : 0;
+      const topROIProducts = sortedByROI.filter(p => p.roi >= avgROI).slice(0, 20);
 
       response.pareto = {
-        top_20_percent_contributes: totalSales > 0 ? Math.round((top20Sales / totalSales) * 1000) / 10 : 0,
+        // Resumen general
+        total_products_with_sales: productsWithData.length,
         total_sales: totalSales,
-        total_utilidad_top20: Math.round(top20Utilidad),
-        top_products: sortedBySales.slice(0, 20).map(p => {
-          // Calcular rentabilidad
-          const shippingCost = p.logistic_type === 'flex' ? FLEX_SHIPPING_COST : 0;
-          const commission = Math.round(p.price * ML_COMMISSION);
-          const utilidad = p.costo > 0 ? Math.round(p.price - p.costo - shippingCost - commission) : 0;
-          const utilidad_30d = utilidad * p.ventas_30d;
-          const roi = p.costo > 0 ? Math.round((utilidad / p.costo) * 1000) / 10 : 0;
-          const margen = p.price > 0 && p.costo > 0 ? Math.round((utilidad / p.price) * 1000) / 10 : 0;
+        total_utilidad: Math.round(totalUtilidad),
 
-          // Determinar estado basado en: Stock >= Ventas30D = Saludable
-          let status: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
-          if (p.stock === 0) {
-            status = 'out_of_stock';
-          } else if (p.stock > p.ventas_30d * 3 && p.ventas_30d > 0) {
-            status = 'overstocked';
-          } else if (p.stock >= p.ventas_30d) {
-            status = 'healthy';
-          } else if (p.stock >= p.ventas_30d * 0.5) {
-            status = 'warning';
-          } else {
-            status = 'critical';
-          }
+        // === PESTAÑA VENTAS ===
+        by_sales: {
+          title: 'Top 80% Ventas',
+          description: 'Productos que representan el 80% de las ventas totales',
+          contribution_percent: top80SalesContrib,
+          products_count: top80SalesProducts.length,
+          total_sales: totalSales,
+          top_products: sortedBySales.slice(0, 20).map(calcProductData),
+        },
 
-          return {
-            codigo_ml: p.id,
-            titulo: p.title.substring(0, 50),
-            ventas_30d: p.ventas_30d,
-            stock: p.stock,
-            proveedor: p.logistic_type,
-            status,
-            // NUEVO: datos de rentabilidad
-            precio: p.price,
-            costo: p.costo,
-            comision: commission,
-            utilidad,
-            utilidad_30d: Math.round(utilidad_30d),
-            roi,
-            margen,
-          };
-        }),
+        // === PESTAÑA UTILIDAD ===
+        by_utilidad: {
+          title: 'Top 80% Utilidad',
+          description: 'Productos que representan el 80% de la utilidad total',
+          contribution_percent: top80UtilidadContrib,
+          products_count: top80UtilidadProducts.length,
+          total_utilidad: Math.round(totalUtilidad),
+          top_products: sortedByUtilidad.slice(0, 20).map(calcProductData),
+        },
+
+        // === PESTAÑA ROI ===
+        by_roi: {
+          title: 'Top ROI',
+          description: 'Productos con mayor retorno sobre inversión',
+          avg_roi: Math.round(avgROI * 10) / 10,
+          products_count: topROIProducts.length,
+          top_products: sortedByROI.slice(0, 20).map(calcProductData),
+        },
+
+        // Retrocompatibilidad: top_products por ventas
+        top_20_percent_contributes: top80SalesContrib,
+        total_utilidad_top20: Math.round(sortedByUtilidad.slice(0, 20).reduce((sum, p) => sum + p.utilidad_30d, 0)),
+        top_products: sortedBySales.slice(0, 20).map(calcProductData),
       };
     }
 
@@ -311,6 +425,9 @@ export async function GET(request: NextRequest) {
           status = 'critical';
         }
 
+        // Calcular valorización de esta publicación
+        const valorizacion = p.price * p.stock;
+
         return {
           codigo_ml: p.id,
           titulo: p.title.substring(0, 50),
@@ -319,7 +436,10 @@ export async function GET(request: NextRequest) {
           days: daysOfStock,
           status,
           price: p.price,
-          logistic_type: p.logistic_type,
+          valorizacion, // NUEVO: valorización por publicación
+          proveedor: p.proveedor, // NUEVO: proveedor real
+          logistic_type: p.logistic_type, // FLEX/FULL para distribución
+          costo: p.costo, // NUEVO: costo del producto
         };
       }).sort((a, b) => {
         // Ordenar: critical primero, luego warning, luego out_of_stock, luego healthy, luego overstocked
@@ -341,24 +461,80 @@ export async function GET(request: NextRequest) {
         critical_items: criticalItems,
         all_products: allProductsWithStatus, // NUEVO: todos los productos con estado
       };
+
+      // NUEVO: Distribución logística FLEX vs FULL
+      // fulfillment = FULL (bodega ML), self_service = FLEX (mi bodega), xd_drop_off = Paquete en correo
+      const flexProducts = products.filter(p => p.logistic_type === 'self_service');
+      const fullProducts = products.filter(p => p.logistic_type === 'fulfillment');
+      const otherProducts = products.filter(p => p.logistic_type !== 'self_service' && p.logistic_type !== 'fulfillment');
+
+      // Productos que necesitan reposición por modalidad
+      // Regla: Si Ventas 30D >= Stock → Reponer
+      const flexNeedRestock = flexProducts.filter(p => p.ventas_30d >= p.stock && p.ventas_30d > 0);
+      const fullNeedRestock = fullProducts.filter(p => p.ventas_30d >= p.stock && p.ventas_30d > 0);
+
+      response.logistics_distribution = {
+        flex: {
+          name: 'FLEX (Mi Bodega)',
+          productos: flexProducts.length,
+          stock_total: flexProducts.reduce((sum, p) => sum + p.stock, 0),
+          ventas_30d: flexProducts.reduce((sum, p) => sum + p.ventas_30d, 0),
+          valorizacion: flexProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+          necesita_reposicion: flexNeedRestock.length,
+        },
+        full: {
+          name: 'FULL (Bodega ML)',
+          productos: fullProducts.length,
+          stock_total: fullProducts.reduce((sum, p) => sum + p.stock, 0),
+          ventas_30d: fullProducts.reduce((sum, p) => sum + p.ventas_30d, 0),
+          valorizacion: fullProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+          necesita_reposicion: fullNeedRestock.length,
+        },
+        other: {
+          name: 'Otros (Drop-off/Acordar)',
+          productos: otherProducts.length,
+          stock_total: otherProducts.reduce((sum, p) => sum + p.stock, 0),
+          ventas_30d: otherProducts.reduce((sum, p) => sum + p.ventas_30d, 0),
+          valorizacion: otherProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+        },
+        // Productos a reponer con detalle
+        products_to_restock: {
+          flex: flexNeedRestock.map(p => ({
+            codigo_ml: p.id,
+            titulo: p.title.substring(0, 40),
+            stock: p.stock,
+            ventas_30d: p.ventas_30d,
+            sugerido_reponer: Math.max(p.ventas_30d - p.stock, 0),
+            proveedor: p.proveedor,
+          })),
+          full: fullNeedRestock.map(p => ({
+            codigo_ml: p.id,
+            titulo: p.title.substring(0, 40),
+            stock: p.stock,
+            ventas_30d: p.ventas_30d,
+            sugerido_reponer: Math.max(p.ventas_30d - p.stock, 0),
+            proveedor: p.proveedor,
+          })),
+        },
+      };
     }
 
     if (analysis === 'full' || analysis === 'suppliers') {
-      // Group by logistic type as "supplier"
-      const byLogistic: Record<string, { productos: number; stock_total: number; valorizacion: number; ventas_30d: number }> = {};
+      // Group by PROVEEDOR REAL (desde Google Sheets), no por logistic_type
+      const byProveedor: Record<string, { productos: number; stock_total: number; valorizacion: number; ventas_30d: number }> = {};
 
       for (const p of products) {
-        const key = p.logistic_type || 'unknown';
-        if (!byLogistic[key]) {
-          byLogistic[key] = { productos: 0, stock_total: 0, valorizacion: 0, ventas_30d: 0 };
+        const key = p.proveedor || 'Sin asignar';
+        if (!byProveedor[key]) {
+          byProveedor[key] = { productos: 0, stock_total: 0, valorizacion: 0, ventas_30d: 0 };
         }
-        byLogistic[key].productos++;
-        byLogistic[key].stock_total += p.stock;
-        byLogistic[key].valorizacion += p.price * p.stock;
-        byLogistic[key].ventas_30d += p.ventas_30d;
+        byProveedor[key].productos++;
+        byProveedor[key].stock_total += p.stock;
+        byProveedor[key].valorizacion += p.price * p.stock;
+        byProveedor[key].ventas_30d += p.ventas_30d;
       }
 
-      response.suppliers = Object.entries(byLogistic)
+      response.suppliers = Object.entries(byProveedor)
         .map(([proveedor, data]) => ({
           proveedor,
           ...data,
@@ -370,7 +546,7 @@ export async function GET(request: NextRequest) {
     if (analysis === 'full' || analysis === 'profitability') {
       // Comisión de MercadoLibre (aproximada)
       const ML_COMMISSION = 0.13; // 13%
-      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '3000');
+      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990'); // $2,990 por envío FLEX
 
       // Calcular margen para cada producto con ventas
       const productsWithMargin = products
