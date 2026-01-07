@@ -463,6 +463,11 @@ export default function Dashboard() {
   const [sendingAlerts, setSendingAlerts] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
+  // Filtros de inventario
+  const [inventoryProveedorFilter, setInventoryProveedorFilter] = useState<string>('all');
+  const [inventoryStatusFilter, setInventoryStatusFilter] = useState<string>('all');
+  const [inventoryGroupByProveedor, setInventoryGroupByProveedor] = useState(false);
+
   // Initialize dark mode from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('darkMode');
@@ -869,16 +874,203 @@ export default function Dashboard() {
             )}
 
             {/* TODOS los productos */}
+            {(() => {
+              // Lista de proveedores únicos
+              const proveedores = [...new Set((inventory.stock_health.all_products || []).map(p => p.proveedor || 'Sin asignar'))].sort();
+
+              // Filtrar productos
+              const filteredProducts = (inventory.stock_health.all_products || []).filter(item => {
+                const matchProveedor = inventoryProveedorFilter === 'all' || (item.proveedor || 'Sin asignar') === inventoryProveedorFilter;
+                const matchStatus = inventoryStatusFilter === 'all' || item.status === inventoryStatusFilter;
+                return matchProveedor && matchStatus;
+              });
+
+              // Calcular totales de los filtrados
+              const filteredTotals = filteredProducts.reduce((acc, item) => ({
+                productos: acc.productos + 1,
+                stock: acc.stock + item.stock,
+                ventas: acc.ventas + item.ventas_30d,
+                valorizacion: acc.valorizacion + (item.valorizacion || 0)
+              }), { productos: 0, stock: 0, ventas: 0, valorizacion: 0 });
+
+              // Agrupar por proveedor si está activo
+              const groupedByProveedor = inventoryGroupByProveedor
+                ? proveedores.map(prov => ({
+                    proveedor: prov,
+                    products: filteredProducts.filter(p => (p.proveedor || 'Sin asignar') === prov),
+                    totals: filteredProducts.filter(p => (p.proveedor || 'Sin asignar') === prov).reduce((acc, item) => ({
+                      stock: acc.stock + item.stock,
+                      ventas: acc.ventas + item.ventas_30d,
+                      valorizacion: acc.valorizacion + (item.valorizacion || 0)
+                    }), { stock: 0, ventas: 0, valorizacion: 0 })
+                  })).filter(g => g.products.length > 0)
+                : null;
+
+              return (
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b">
                 <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                   <Boxes className="w-5 h-5 text-blue-600" />
-                  Todos los Productos ({inventory.stock_health.all_products?.length || 0})
+                  Todos los Productos ({filteredProducts.length}{filteredProducts.length !== (inventory.stock_health.all_products?.length || 0) ? ` de ${inventory.stock_health.all_products?.length}` : ''})
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">
                   Ordenados por estado de urgencia (críticos primero). Incluye proveedor y valorización.
                 </p>
+
+                {/* Filtros */}
+                <div className="mt-4 flex flex-wrap gap-4 items-center">
+                  {/* Filtro por Proveedor */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700">Proveedor:</label>
+                    <select
+                      value={inventoryProveedorFilter}
+                      onChange={(e) => setInventoryProveedorFilter(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="all">Todos</option>
+                      {proveedores.map(prov => (
+                        <option key={prov} value={prov}>{prov}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filtro por Estado */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700">Estado:</label>
+                    <select
+                      value={inventoryStatusFilter}
+                      onChange={(e) => setInventoryStatusFilter(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="critical">Crítico</option>
+                      <option value="warning">Alerta</option>
+                      <option value="healthy">Saludable</option>
+                      <option value="out_of_stock">Sin Stock</option>
+                      <option value="overstocked">Sobrestock</option>
+                    </select>
+                  </div>
+
+                  {/* Toggle Agrupar por Proveedor */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700">Agrupar por Proveedor:</label>
+                    <button
+                      onClick={() => setInventoryGroupByProveedor(!inventoryGroupByProveedor)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        inventoryGroupByProveedor
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {inventoryGroupByProveedor ? 'Activado' : 'Desactivado'}
+                    </button>
+                  </div>
+
+                  {/* Limpiar filtros */}
+                  {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all') && (
+                    <button
+                      onClick={() => {
+                        setInventoryProveedorFilter('all');
+                        setInventoryStatusFilter('all');
+                      }}
+                      className="text-sm text-blue-600 hover:text-blue-800 underline"
+                    >
+                      Limpiar filtros
+                    </button>
+                  )}
+                </div>
+
+                {/* Totales de filtrado */}
+                {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all') && (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="text-sm font-medium text-blue-800">
+                      Totales filtrados: {filteredTotals.productos} productos | Stock: {filteredTotals.stock.toLocaleString()} | Ventas 30D: {filteredTotals.ventas.toLocaleString()} | Valorización: ${filteredTotals.valorizacion.toLocaleString()}
+                    </p>
+                  </div>
+                )}
               </div>
+
+              {/* Vista agrupada por proveedor */}
+              {inventoryGroupByProveedor && groupedByProveedor ? (
+                <div className="divide-y divide-gray-200">
+                  {groupedByProveedor.map((group, gi) => (
+                    <div key={gi} className="p-4">
+                      <div className="flex items-center justify-between mb-3 bg-gray-100 rounded-lg p-3">
+                        <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                          <Users className="w-4 h-4 text-indigo-600" />
+                          {group.proveedor} ({group.products.length} productos)
+                        </h4>
+                        <div className="flex gap-4 text-sm text-gray-600">
+                          <span>Stock: <strong>{group.totals.stock.toLocaleString()}</strong></span>
+                          <span>Ventas 30D: <strong>{group.totals.ventas.toLocaleString()}</strong></span>
+                          <span>Valor: <strong>${group.totals.valorizacion.toLocaleString()}</strong></span>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Tipo</th>
+                              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Stock</th>
+                              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
+                              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Días</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Valorización</th>
+                              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {group.products.map((item, i) => (
+                              <tr key={i} className={`hover:bg-gray-50 ${
+                                item.status === 'critical' ? 'bg-red-50' :
+                                item.status === 'warning' ? 'bg-yellow-50' :
+                                item.status === 'out_of_stock' ? 'bg-gray-100' : ''
+                              }`}>
+                                <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.codigo_ml}</td>
+                                <td className="px-3 py-2 text-sm text-gray-900 max-w-[200px] truncate">{item.titulo}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    item.logistic_type === 'self_service' ? 'bg-blue-100 text-blue-800' :
+                                    item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {item.logistic_type === 'self_service' ? 'FLEX' : item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                    item.stock === 0 ? 'bg-gray-200 text-gray-600' :
+                                    item.stock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                    item.stock < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                                  }`}>
+                                    {item.stock}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-center text-sm text-gray-600">{item.ventas_30d}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    item.days <= 7 ? 'bg-red-100 text-red-800' :
+                                    item.days <= 30 ? 'bg-yellow-100 text-yellow-800' :
+                                    item.days > 90 ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                                  }`}>
+                                    {item.days === 999 ? 'Inf' : `${item.days}d`}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-right text-sm text-gray-900">${item.price.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right text-sm text-gray-600">${item.valorizacion?.toLocaleString() || 0}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <StockStatusIndicator stock={item.stock} ventas30d={item.ventas_30d} statusOverride={item.status} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50 sticky top-0">
@@ -896,7 +1088,7 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {(inventory.stock_health.all_products || []).map((item, i) => (
+                    {filteredProducts.map((item, i) => (
                       <tr key={i} className={`hover:bg-gray-50 ${
                         item.status === 'critical' ? 'bg-red-50' :
                         item.status === 'warning' ? 'bg-yellow-50' :
@@ -955,7 +1147,10 @@ export default function Dashboard() {
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
+              );
+            })()}
           </div>
         )}
 

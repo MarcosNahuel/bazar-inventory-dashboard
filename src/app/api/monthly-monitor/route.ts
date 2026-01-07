@@ -123,9 +123,11 @@ export async function GET(request: NextRequest) {
       const itemsInOrder = order.order_items.length;
       const totalUnitsInOrder = order.order_items.reduce((sum: number, item: { quantity: number }) => sum + item.quantity, 0);
 
-      // Determinar tipo de logística (asumimos el del primer item)
-      const logisticType = order.order_items[0]?.item?.shipping?.logistic_type || 'unknown';
-      const isFlexOrder = logisticType === 'self_service';
+      // Determinar tipo de logística desde el shipping de la orden
+      // Por ahora asumimos costo FLEX para órdenes con shipping (se puede mejorar con API de shipments)
+      const hasShipping = order.shipping && order.shipping.id;
+      const logisticType = hasShipping ? 'self_service' : 'unknown'; // Asumimos FLEX por defecto
+      const isFlexOrder = hasShipping; // Si tiene shipping, tiene costo de envío
       const packageShippingCost = isFlexOrder ? FLEX_SHIPPING_COST : 0;
 
       for (const item of order.order_items) {
