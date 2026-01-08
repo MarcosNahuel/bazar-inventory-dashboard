@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
+import { getCache, setCache } from '@/lib/cache/supabase-cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Allow up to 60 seconds for this endpoint
+
+// TTL del caché: 2 horas (datos históricos cambian poco)
+const CACHE_TTL_SECONDS = 2 * 60 * 60;
 
 interface MonthlySale {
   month: string;
@@ -14,12 +18,46 @@ interface MonthlySale {
   avg_ticket: number;
 }
 
+interface SalesHistoryResponse {
+  series: MonthlySale[];
+  statistics: {
+    total_revenue: number;
+    total_orders: number;
+    total_units: number;
+    avg_monthly_revenue: number;
+    avg_monthly_orders: number;
+    avg_ticket: number;
+    growth_rate_6m: number;
+    best_month: { month: string; revenue: number; orders: number } | null;
+    worst_month: { month: string; revenue: number; orders: number } | null;
+  };
+  seasonality: Record<string, number>;
+  yearly_comparison: Record<number, { revenue: number; orders: number; units: number }>;
+  generated_at: string;
+}
+
 // GET /api/sales-history - Get complete sales time series
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const months = parseInt(searchParams.get('months') || '24'); // Default 24 months (2 years)
+    const forceRefresh = searchParams.get('refresh') === 'true';
 
+    // Cache key basado en cantidad de meses
+    const cacheKey = `sales-history:${months}`;
+
+    // Intentar obtener del caché (a menos que se fuerce refresh)
+    if (!forceRefresh) {
+      const cached = await getCache<SalesHistoryResponse>(cacheKey);
+      if (cached) {
+        return NextResponse.json({
+          ...cached,
+          from_cache: true
+        });
+      }
+    }
+
+    console.log(`🔄 Obteniendo datos frescos de ML API (${months} meses)...`);
     const ml = getMercadoLibreClient();
 
     // Get monthly sales series
@@ -84,7 +122,7 @@ export async function GET(request: NextRequest) {
       yearlyData[s.year].units += s.units_sold;
     }
 
-    const response = {
+    const response: SalesHistoryResponse = {
       series,
       statistics: {
         total_revenue: totalRevenue,
@@ -110,7 +148,11 @@ export async function GET(request: NextRequest) {
       generated_at: new Date().toISOString()
     };
 
-    return NextResponse.json(response);
+    // Guardar en caché para futuras requests
+    await setCache(cacheKey, response, CACHE_TTL_SECONDS);
+    console.log(`✅ Datos de sales-history guardados en caché`);
+
+    return NextResponse.json({ ...response, from_cache: false });
   } catch (error) {
     console.error('Error loading sales history:', error);
     return NextResponse.json(

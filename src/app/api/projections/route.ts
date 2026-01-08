@@ -1,24 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
-import { getCachedCosts, CostData } from '@/lib/google-sheets/costs-cache';
+import { getCachedCosts } from '@/lib/google-sheets/costs-cache';
+import { getCache, setCache } from '@/lib/cache/supabase-cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 // Constantes para cálculo de utilidad
 const ML_COMMISSION = 0.13; // 13% comisión MercadoLibre
-const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '3000');
 
-// Cache para evitar múltiples llamadas a la API de ML
-interface CacheEntry {
-  data: DailyData[];
-  timestamp: number;
-  daysBack: number;
-}
+// TTL del caché: 1 hora
+const CACHE_TTL_SECONDS = 60 * 60;
 
-let projectionsCache: CacheEntry | null = null;
+// Lock para evitar múltiples llamadas concurrentes a la API de ML
 let fetchInProgress: Promise<DailyData[]> | null = null;
-const CACHE_TTL = 60 * 60 * 1000; // 1 hora en ms
 
 interface DailyData {
   date: string;
@@ -49,43 +44,47 @@ interface ProjectedDay {
   roi_forecast?: number;
 }
 
-// Check if cache is valid
-function isCacheValid(daysBack: number): boolean {
-  if (!projectionsCache) return false;
-  const now = Date.now();
-  const isExpired = now - projectionsCache.timestamp > CACHE_TTL;
-  const isSamePeriod = projectionsCache.daysBack >= daysBack;
-  return !isExpired && isSamePeriod;
+// Cache key para datos diarios
+function getDailyCacheKey(daysBack: number): string {
+  return `projections-daily:${daysBack}`;
 }
 
-// Get all orders and aggregate by day (with cache and lock)
-async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number): Promise<DailyData[]> {
-  // Usar caché si está disponible y válido
-  if (isCacheValid(daysBack) && projectionsCache) {
-    console.log('📦 Usando datos en caché para proyecciones');
-    // Si el cache tiene más días, recortamos
-    if (projectionsCache.daysBack > daysBack) {
-      return projectionsCache.data.slice(-daysBack);
+// Get all orders and aggregate by day (with Supabase cache and lock)
+async function getDailySeries(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number, forceRefresh: boolean = false): Promise<{ data: DailyData[]; fromCache: boolean }> {
+  const cacheKey = getDailyCacheKey(daysBack);
+
+  // Intentar obtener del caché (a menos que se fuerce refresh)
+  if (!forceRefresh) {
+    const cached = await getCache<DailyData[]>(cacheKey);
+    if (cached) {
+      console.log('📦 Usando datos en caché de Supabase para proyecciones');
+      return { data: cached, fromCache: true };
     }
-    return projectionsCache.data;
   }
 
   // Si ya hay un fetch en progreso, esperar a que termine
   if (fetchInProgress) {
     console.log('⏳ Esperando fetch en progreso...');
-    return fetchInProgress;
+    const data = await fetchInProgress;
+    return { data, fromCache: false };
   }
 
   // Iniciar fetch con lock
   console.log('🔄 Obteniendo datos frescos de ML API...');
   fetchInProgress = (async () => {
     const orders = await ml.getAllOrders(daysBack);
-    return processOrders(orders, daysBack);
+    const processed = processOrders(orders, daysBack);
+
+    // Guardar en Supabase
+    await setCache(cacheKey, processed, CACHE_TTL_SECONDS);
+    console.log(`✅ Datos de proyecciones guardados en caché Supabase (${processed.length} días)`);
+
+    return processed;
   })();
 
   try {
     const result = await fetchInProgress;
-    return result;
+    return { data: result, fromCache: false };
   } finally {
     fetchInProgress = null;
   }
@@ -131,17 +130,7 @@ function processOrders(orders: any[], daysBack: number): DailyData[] {
   }
 
   // Convert to array sorted by date
-  const result = Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date));
-
-  // Guardar en caché
-  projectionsCache = {
-    data: result,
-    timestamp: Date.now(),
-    daysBack: daysBack
-  };
-  console.log(`✅ Datos guardados en caché (${result.length} días)`);
-
-  return result;
+  return Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // Linear regression
@@ -456,17 +445,10 @@ export async function GET(request: NextRequest) {
     const forecastDays = parseInt(searchParams.get('forecast') || '30');
     const forceRefresh = searchParams.get('refresh') === 'true';
 
-    // Forzar refresh si se solicita
-    if (forceRefresh) {
-      projectionsCache = null;
-      console.log('🗑️ Caché limpiado por solicitud');
-    }
-
-    const usingCache = isCacheValid(historicalDays);
     const ml = getMercadoLibreClient();
 
     // Get daily series for the historical period (up to 365 days for full year view)
-    const dailySeries = await getDailySeries(ml, Math.min(historicalDays, 365));
+    const { data: dailySeries, fromCache: usingCache } = await getDailySeries(ml, Math.min(historicalDays, 365), forceRefresh);
 
     // Filter to only days with data for regression (but keep all for display)
     const daysWithData = dailySeries.filter(d => d.revenue > 0);
@@ -617,7 +599,7 @@ export async function GET(request: NextRequest) {
         model: 'Linear Regression + Weekly Seasonality',
         generated_at: new Date().toISOString(),
         from_cache: usingCache,
-        cache_expires_at: projectionsCache ? new Date(projectionsCache.timestamp + CACHE_TTL).toISOString() : null
+        cache_ttl_seconds: CACHE_TTL_SECONDS
       },
       // NUEVAS MÉTRICAS FINANCIERAS
       financial: {
