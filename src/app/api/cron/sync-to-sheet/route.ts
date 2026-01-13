@@ -168,17 +168,23 @@ function isSupermarket(product: MLProductFull): boolean {
   return false;
 }
 
-// NUEVO: Detectar si producto tiene convivencia FULL + FLEX
-// Según doc ML: logistic_type === "fulfillment" && tags.includes("self_service_in")
-function isConvivencia(product: MLProductFull): boolean {
-  const isFullfillment = product.shipping?.logistic_type === 'fulfillment';
-  const hasSelfServiceTag = product.tags?.includes('self_service_in');
+// ACTUALIZADO: Detectar convivencia FULL + FLEX
+// Nueva lógica del cliente: NO es supermercado + tiene stock FULL > 0 + tiene stock FLEX > 0
+function isConvivenciaByStock(
+  supermarket: boolean,
+  stockFull: number,
+  stockFlex: number
+): boolean {
+  // Si es supermercado, NO es convivencia (supermercado solo usa FULL)
+  if (supermarket) return false;
 
-  return isFullfillment && hasSelfServiceTag;
+  // Convivencia = tiene stock en ambas ubicaciones
+  return stockFull > 0 && stockFlex > 0;
 }
 
-// Generar tags útiles del producto (CORREGIDO)
-function generateProductTags(product: MLProductFull): string {
+// Generar tags útiles del producto
+// Nota: El tag de Convivencia se agrega dinámicamente según stock, no aquí
+function generateProductTags(product: MLProductFull, hasConvivencia: boolean = false): string {
   const tags: string[] = [];
 
   // Tags de logística desde los tags del producto (más confiable)
@@ -186,8 +192,8 @@ function generateProductTags(product: MLProductFull): string {
   if (product.tags?.includes('self_service_in')) tags.push('Flex Activo');
   if (product.shipping?.logistic_type === 'fulfillment') tags.push('Full');
 
-  // Convivencia
-  if (isConvivencia(product)) tags.push('Convivencia');
+  // Convivencia (pasado como parámetro basado en stock)
+  if (hasConvivencia) tags.push('Convivencia');
 
   // Tags de catálogo
   if (product.catalog_listing) tags.push('Catálogo');
@@ -225,48 +231,57 @@ function classifyLogistic(logisticType: string | undefined): 'full' | 'flex' | '
   return 'other';
 }
 
-// Leer datos existentes para preservar Proveedor y Costo
-// Ahora busca por MLC+Logística como clave única (para convivencia)
-async function getExistingData(sheets: ReturnType<typeof getGoogleSheetsClient>, spreadsheetId: string): Promise<Map<string, { proveedor: string; costo: number }>> {
-  const existing = new Map<string, { proveedor: string; costo: number }>();
+// Leer datos de Costos_Proveedores (SKU, Proveedor, Costo por MLC)
+async function getCostProviderData(sheets: ReturnType<typeof getGoogleSheetsClient>, spreadsheetId: string): Promise<Map<string, { sku: string; proveedor: string; costo: number }>> {
+  const data = new Map<string, { sku: string; proveedor: string; costo: number }>();
 
   try {
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Global!A:O',
+      range: 'Costos_Proveedores!A:Z',  // Leer todas las columnas
     });
 
     const rows = response.data.values;
-    if (!rows || rows.length < 2) return existing;
+    if (!rows || rows.length < 2) return data;
 
-    const headers = rows[0].map((h: string) => h.toString().toLowerCase().replace(/\s+/g, '_'));
-    const mlcIdx = headers.indexOf('mlc') !== -1 ? headers.indexOf('mlc') : headers.indexOf('codigo_ml');
-    const provIdx = headers.indexOf('proveedor');
-    const costoIdx = headers.indexOf('costo');
+    // Encontrar índices de columnas por nombre (case insensitive)
+    const headers = rows[0].map((h: string) => h?.toString().toLowerCase().replace(/\s+/g, '_') || '');
 
-    if (mlcIdx === -1) return existing;
+    // Buscar columna MLC (puede ser "número_de_publicación", "codigo_ml", "mlc")
+    const mlcIdx = headers.findIndex((h: string) =>
+      h.includes('número_de_publicación') || h.includes('numero_de_publicacion') ||
+      h === 'mlc' || h === 'codigo_ml' || h.includes('publicación') || h.includes('publicacion')
+    );
+    const skuIdx = headers.findIndex((h: string) => h === 'sku');
+    const provIdx = headers.findIndex((h: string) => h === 'proveedor');
+    const costoIdx = headers.findIndex((h: string) => h === 'costo');
+
+    console.log(`[CRON-SHEET] Costos_Proveedores columns: mlc=${mlcIdx}, sku=${skuIdx}, prov=${provIdx}, costo=${costoIdx}`);
+
+    if (mlcIdx === -1) {
+      console.warn('[CRON-SHEET] Could not find MLC column in Costos_Proveedores');
+      return data;
+    }
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const mlc = row[mlcIdx]?.toString();
+      const mlc = row[mlcIdx]?.toString().trim();
 
       if (mlc) {
-        // Usar solo MLC como clave (el proveedor y costo son los mismos para FULL y FLEX)
-        if (!existing.has(mlc)) {
-          existing.set(mlc, {
-            proveedor: provIdx !== -1 ? (row[provIdx]?.toString() || '') : '',
-            costo: costoIdx !== -1 ? (parseFloat(row[costoIdx]?.toString().replace(/[$.]/g, '').replace(',', '.')) || 0) : 0,
-          });
-        }
+        data.set(mlc, {
+          sku: skuIdx !== -1 ? (row[skuIdx]?.toString().trim() || '') : '',
+          proveedor: provIdx !== -1 ? (row[provIdx]?.toString().trim() || '') : '',
+          costo: costoIdx !== -1 ? (parseFloat(row[costoIdx]?.toString().replace(/[$.]/g, '').replace(',', '.')) || 0) : 0,
+        });
       }
     }
 
-    console.log(`[CRON-SHEET] Found ${existing.size} existing products with cost data`);
+    console.log(`[CRON-SHEET] Found ${data.size} products in Costos_Proveedores with SKU data`);
   } catch (error) {
-    console.error('[CRON-SHEET] Error reading existing data:', error);
+    console.error('[CRON-SHEET] Error reading Costos_Proveedores:', error);
   }
 
-  return existing;
+  return data;
 }
 
 // GET /api/cron/sync-to-sheet - Ejecutado por Vercel Cron diariamente
@@ -295,8 +310,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       throw new Error('GOOGLE_SPREADSHEET_ID not configured');
     }
 
-    // 1. Obtener datos existentes para preservar proveedor/costo
-    const existingData = await getExistingData(sheets, spreadsheetId);
+    // 1. Obtener datos de Costos_Proveedores (SKU, Proveedor, Costo)
+    const costProviderData = await getCostProviderData(sheets, spreadsheetId);
 
     // 2. Obtener todos los IDs de productos
     console.log('[CRON-SHEET] Fetching all product IDs...');
@@ -410,15 +425,42 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
           const product = item.body as unknown as MLProductFull;
           const supermarket = isSupermarket(product);
-          const convivencia = isConvivencia(product);
           const sales = salesByProduct[product.id] || { full: 0, flex: 0, other: 0, total: 0 };
-          const existing = existingData.get(product.id) || { proveedor: '', costo: 0 };
-          const tags = generateProductTags(product);
 
-          // Datos comunes
+          // Obtener datos de Costos_Proveedores (SKU, Proveedor, Costo)
+          const costData = costProviderData.get(product.id) || { sku: '', proveedor: '', costo: 0 };
+
+          // SIEMPRE obtener stock por ubicación para detectar convivencia
+          let stockFull = 0;
+          let stockFlex = 0;
+
+          // Intentar obtener stock separado via user_product_id (más preciso)
+          const userProductId = product.user_product_id ||
+            (product.variations && product.variations[0]?.user_product_id);
+
+          if (userProductId) {
+            const separatedStock = await ml.getUserProductStock(userProductId);
+            if (separatedStock) {
+              stockFull = separatedStock.meli_facility;
+              stockFlex = separatedStock.selling_address;
+            }
+          }
+
+          // Fallback: usar getStock si no hay datos
+          if (stockFull === 0 && stockFlex === 0) {
+            const stock = await getStockByLocation(ml, product.id);
+            stockFull = stock.fulfillment;
+            stockFlex = stock.self_service + stock.xd_drop_off;
+          }
+
+          // NUEVA LÓGICA: Convivencia = NO supermercado + stock FULL > 0 + stock FLEX > 0
+          const convivencia = isConvivenciaByStock(supermarket, stockFull, stockFlex);
+          const tags = generateProductTags(product, convivencia);
+
+          // Datos comunes - SKU viene de Costos_Proveedores, no de ML
           const commonData = {
             mlc: product.id,
-            sku: product.seller_custom_field || '',
+            sku: costData.sku || product.seller_custom_field || '',  // Preferir SKU de hoja
             titulo: product.title.substring(0, 100),
             estado: product.status,
             es_supermarket: supermarket ? 'SÍ' : 'NO',
@@ -426,35 +468,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             catalog_product_id: product.catalog_product_id || '',
             precio: product.price,
             tags,
-            proveedor: existing.proveedor,
-            costo: existing.costo || '',
+            proveedor: costData.proveedor,
+            costo: costData.costo || '',
             ultima_actualizacion: new Date().toISOString(),
           };
 
           if (convivencia) {
             // CONVIVENCIA: Generar 2 filas (FULL y FLEX)
             convivenciaCount++;
-
-            // Obtener stock separado usando user_product_id
-            let stockFull = 0;
-            let stockFlex = 0;
-
-            // Intentar obtener user_product_id
-            const userProductId = product.user_product_id ||
-              (product.variations && product.variations[0]?.user_product_id);
-
-            if (userProductId) {
-              const separatedStock = await ml.getUserProductStock(userProductId);
-              if (separatedStock) {
-                stockFull = separatedStock.meli_facility;
-                stockFlex = separatedStock.selling_address;
-              }
-            } else {
-              // Fallback: usar getStock si no hay user_product_id
-              const stock = await getStockByLocation(ml, product.id);
-              stockFull = stock.fulfillment;
-              stockFlex = stock.self_service;
-            }
 
             // Fila FULL
             products.push({
@@ -474,10 +495,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
           } else {
             // SIN CONVIVENCIA: 1 sola fila
-            const stock = await getStockByLocation(ml, product.id);
             const totalStock = supermarket
-              ? stock.fulfillment + stock.xd_drop_off
-              : stock.total;
+              ? stockFull  // Supermercado solo usa FULL
+              : stockFull + stockFlex;
 
             // Normalizar logística a FULL/FLEX/OTHER para consistencia
             const rawLogistic = product.shipping?.logistic_type || '';
@@ -507,8 +527,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     console.log(`[CRON-SHEET] Found ${convivenciaCount} products with FULL+FLEX convivencia`);
 
-    // 5. Escribir al Google Sheet
-    console.log(`[CRON-SHEET] Writing ${products.length} products to Sheet...`);
+    // 5. Ordenar productos por catalog_product_id para agrupar catálogo + tradicional
+    // Los productos con el mismo catalog_product_id aparecerán juntos
+    console.log(`[CRON-SHEET] Sorting ${products.length} products by Catalog ID...`);
+
+    const sortedProducts = [...products].sort((a, b) => {
+      // Primero por catalog_product_id (los que tienen ID van primero, agrupados)
+      const catA = a.catalog_product_id || 'zzz';  // Sin catalog_id van al final
+      const catB = b.catalog_product_id || 'zzz';
+
+      if (catA !== catB) return catA.localeCompare(catB);
+
+      // Luego por MLC para consistencia dentro del mismo grupo
+      return a.mlc.localeCompare(b.mlc);
+    });
+
+    // Contar grupos de catálogo
+    const catalogGroups = new Set(products.filter(p => p.catalog_product_id).map(p => p.catalog_product_id));
+    console.log(`[CRON-SHEET] Found ${catalogGroups.size} unique catalog_product_ids`);
+
+    // 6. Escribir al Google Sheet
+    console.log(`[CRON-SHEET] Writing ${sortedProducts.length} products to Sheet...`);
 
     // Headers simplificados: Stock y Ventas son por fila (según logística)
     const headers = [
@@ -520,7 +559,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       'Última Actualización'
     ];
 
-    const rows = products.map(p => [
+    const rows = sortedProducts.map(p => [
       p.mlc, p.sku, p.titulo, p.estado,
       p.stock, p.ventas_30d, p.logistica,
       p.es_supermarket, p.es_catalogo, p.catalog_product_id,
@@ -561,6 +600,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       closed: products.filter(p => p.estado === 'closed').length,
       supermarket: products.filter(p => p.es_supermarket === 'SÍ').length,
       catalogo: products.filter(p => p.es_catalogo === 'SÍ').length,
+      catalog_groups: catalogGroups.size,  // Grupos únicos de catalog_product_id
+      with_sku: products.filter(p => p.sku && p.sku !== '').length,
       with_cost: products.filter(p => p.costo && p.costo !== '').length,
       with_provider: products.filter(p => p.proveedor && p.proveedor !== '').length,
       full_rows: fullRows.length,
