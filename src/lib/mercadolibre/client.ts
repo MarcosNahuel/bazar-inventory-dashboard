@@ -175,10 +175,27 @@ class MercadoLibreClient {
         status: string;
         permalink: string;
         thumbnail: string;
-        shipping: { logistic_type: string };
+        shipping: {
+          logistic_type: string;
+          free_shipping: boolean;
+        };
         category_id: string;
         date_created: string;
         last_updated: string;
+        // Campos adicionales para detección
+        tags: string[];
+        channels: string[];
+        listing_type_id: string;
+        catalog_listing: boolean;
+        catalog_product_id: string | null;
+        // Para stock separado FULL/FLEX - puede estar en variations
+        user_product_id?: string;
+        variations?: Array<{
+          id: number;
+          user_product_id?: string;
+          available_quantity: number;
+          seller_custom_field: string | null;
+        }>;
       };
     }>>(`/items?ids=${idsParam}`);
   }
@@ -194,6 +211,65 @@ class MercadoLibreClient {
       }>(`/user-products/${itemId}/stock`);
     } catch {
       // Fallback: usar available_quantity del item
+      return null;
+    }
+  }
+
+  // Obtener información de envío
+  // Según doc ML: logistic.type puede ser: drop_off, fulfillment, cross_docking, self_service, xd_drop_off
+  async getShipment(shipmentId: number) {
+    try {
+      const response = await this.request<{
+        id: number;
+        status: string;
+        logistic: {
+          mode: string;
+          type: string;  // drop_off, fulfillment, cross_docking, etc.
+          direction: string;
+        };
+        tracking_number: string | null;
+      }>(`/shipments/${shipmentId}`, {
+        headers: {
+          'x-format-new': 'true'  // Requerido por ML para nuevo formato
+        }
+      });
+      return response;
+    } catch {
+      return null;
+    }
+  }
+
+  // Obtener stock separado por ubicación (FULL vs FLEX)
+  // Requiere user_product_id, no item_id
+  async getUserProductStock(userProductId: string) {
+    try {
+      const response = await this.request<{
+        locations: Array<{
+          type: string;  // meli_facility (FULL) o selling_address (FLEX)
+          quantity: number;
+        }>;
+        id: string;
+        user_id: number;
+      }>(`/user-products/${userProductId}/stock`);
+
+      // Extraer stock por tipo
+      const stockByType = {
+        meli_facility: 0,    // FULL
+        selling_address: 0,  // FLEX
+        total: 0
+      };
+
+      for (const loc of response.locations || []) {
+        if (loc.type === 'meli_facility') {
+          stockByType.meli_facility = loc.quantity;
+        } else if (loc.type === 'selling_address') {
+          stockByType.selling_address = loc.quantity;
+        }
+        stockByType.total += loc.quantity;
+      }
+
+      return stockByType;
+    } catch {
       return null;
     }
   }
