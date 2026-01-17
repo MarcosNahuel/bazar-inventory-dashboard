@@ -570,6 +570,123 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   }
 }
 
+// PATCH: Actualizar solo ventas por canal (para workflow n8n)
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const startTime = Date.now();
+
+  try {
+    const body = await request.json();
+    const salesData: Array<{
+      mlc: string;
+      ventas_full: number;
+      ventas_flex: number;
+      ventas_xd: number;
+      ventas_total: number;
+    }> = body.sales || [];
+
+    if (salesData.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'No sales data provided',
+      }, { status: 400 });
+    }
+
+    console.log(`[SyncToSheet] Updating sales for ${salesData.length} products...`);
+
+    const sheets = getGoogleSheetsClient();
+    const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+
+    if (!spreadsheetId) {
+      throw new Error('GOOGLE_SPREADSHEET_ID not configured');
+    }
+
+    // 1. Leer datos actuales del Sheet
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'Global!A:T',
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length < 2) {
+      return NextResponse.json({
+        success: false,
+        error: 'Sheet vacío. Ejecute primero una sincronización completa (POST).',
+      }, { status: 400 });
+    }
+
+    const headers = rows[0];
+    const mlcIdx = headers.indexOf('MLC');
+    const ventasFullIdx = headers.indexOf('Ventas 30D FULL');
+    const ventasFlexIdx = headers.indexOf('Ventas 30D FLEX');
+    const ventasXdIdx = headers.indexOf('Ventas 30D XD');
+    const ventasTotalIdx = headers.indexOf('Ventas 30D Total');
+    const updateIdx = headers.indexOf('Última Actualización');
+
+    if (mlcIdx === -1 || ventasTotalIdx === -1) {
+      return NextResponse.json({
+        success: false,
+        error: 'Estructura de Sheet inválida. Faltan columnas de ventas.',
+      }, { status: 400 });
+    }
+
+    // Crear mapa de ventas por MLC
+    const salesMap = new Map(salesData.map(s => [s.mlc, s]));
+
+    // 2. Actualizar ventas de cada producto
+    let updated = 0;
+    const updatedRows: string[][] = [headers];
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = [...rows[i]];
+      const mlc = row[mlcIdx];
+
+      if (mlc && salesMap.has(mlc)) {
+        const sales = salesMap.get(mlc)!;
+
+        if (ventasFullIdx !== -1) row[ventasFullIdx] = String(sales.ventas_full);
+        if (ventasFlexIdx !== -1) row[ventasFlexIdx] = String(sales.ventas_flex);
+        if (ventasXdIdx !== -1) row[ventasXdIdx] = String(sales.ventas_xd);
+        row[ventasTotalIdx] = String(sales.ventas_total);
+        row[updateIdx] = new Date().toISOString();
+
+        updated++;
+      }
+
+      updatedRows.push(row);
+    }
+
+    // 3. Escribir datos actualizados
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: 'Global!A1',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: updatedRows,
+      },
+    });
+
+    const duration = Date.now() - startTime;
+
+    console.log(`[SyncToSheet] Sales update completed: ${updated} products in ${duration}ms`);
+
+    return NextResponse.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      updated_count: updated,
+      total_products: rows.length - 1,
+      duration_ms: duration,
+    });
+
+  } catch (error) {
+    console.error('[SyncToSheet] Error updating sales:', error);
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      duration_ms: Date.now() - startTime,
+    }, { status: 500 });
+  }
+}
+
 // GET: Estado de sincronización
 export async function GET(): Promise<NextResponse> {
   try {

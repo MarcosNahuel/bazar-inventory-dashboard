@@ -483,6 +483,85 @@ class MercadoLibreClient {
     return series;
   }
 
+  // Obtener costos de envío (incluye bonificaciones FLEX)
+  async getShipmentCosts(shipmentId: number) {
+    try {
+      return await this.request<{
+        receiver: {
+          cost: number;
+          currency_id: string;
+        };
+        sender: {
+          cost: number;
+          currency_id: string;
+        };
+        compensation: {
+          cost: number;
+          currency_id: string;
+        };
+        bonification: {
+          cost: number;
+          currency_id: string;
+        };
+      }>(`/shipments/${shipmentId}/costs2`);
+    } catch {
+      return null;
+    }
+  }
+
+  // Obtener billing de una orden (incluye bonificaciones)
+  async getOrderBilling(orderId: number) {
+    try {
+      return await this.request<{
+        transactions: Array<{
+          transaction_id: string;
+          type: string;
+          payment_method: string;
+          amount: number;
+          currency_id: string;
+          status: string;
+        }>;
+        charges: Array<{
+          type: string;  // shipping_bonus, commission, etc.
+          amount: number;
+          currency_id: string;
+        }>;
+      }>(`/orders/${orderId}/billing`);
+    } catch {
+      return null;
+    }
+  }
+
+  // Obtener detalles del envío incluyendo tipo logístico
+  async getShipmentDetails(shipmentId: number) {
+    try {
+      return await this.request<{
+        id: number;
+        status: string;
+        logistic_type: string;  // fulfillment, self_service, xd_drop_off, etc.
+        tracking_number: string | null;
+        date_created: string;
+        receiver_address: {
+          city: { name: string };
+          state: { name: string };
+        };
+        shipping_option: {
+          cost: number;
+          currency_id: string;
+          shipping_method_id: number;
+          name: string;
+        };
+        cost: number;
+        cost_components: Array<{
+          type: string;
+          value: number;
+        }>;
+      }>(`/shipments/${shipmentId}`);
+    } catch {
+      return null;
+    }
+  }
+
   // Obtener tokens actuales
   getTokens() {
     return {

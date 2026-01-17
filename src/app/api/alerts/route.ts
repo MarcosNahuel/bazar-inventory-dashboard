@@ -2,77 +2,152 @@ import { NextResponse } from 'next/server';
 import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
 
-interface LowStockProduct {
+interface AlertProduct {
   id: string;
   title: string;
   sku: string | null;
   stock: number;
+  ventas_30d: number;
   price: number;
   permalink: string;
   thumbnail: string;
   logistic_type: string | null;
-  deficit: number;
+  status: 'critical' | 'warning' | 'out_of_stock';
+  days_of_stock: number;
 }
 
-// GET /api/alerts - Obtener productos con stock bajo
+// Helper para obtener ventas por producto
+async function getSalesById(ml: ReturnType<typeof getMercadoLibreClient>, daysBack: number) {
+  const salesById: Record<string, number> = {};
+  const orders = await ml.getAllOrders(daysBack);
+
+  for (const order of orders) {
+    if (order.status === 'cancelled') continue;
+    for (const item of order.order_items) {
+      const itemId = item.item.id;
+      salesById[itemId] = (salesById[itemId] || 0) + item.quantity;
+    }
+  }
+  return salesById;
+}
+
+// GET /api/alerts - Obtener productos con stock insuficiente
+// CRITERIO: Stock < Ventas30D = Alerta (no cubre el próximo mes)
 export async function GET() {
   try {
     const ml = getMercadoLibreClient();
-    const STOCK_THRESHOLD = parseInt(process.env.STOCK_ALERT_THRESHOLD || '5');
 
-    // Obtener todos los productos activos
-    const productsResult = await ml.getProductIds('active', 100, 0);
-    const lowStockProducts: LowStockProduct[] = [];
+    // Obtener TODOS los productos activos con paginación
+    const allProductIds: string[] = [];
+    let offset = 0;
+    const pageSize = 50;
 
-    // Procesar en batches
+    while (true) {
+      const productsResult = await ml.getProductIds('active', pageSize, offset);
+      if (productsResult.results.length === 0) break;
+      allProductIds.push(...productsResult.results);
+      offset += pageSize;
+      if (offset >= productsResult.paging.total || offset >= 500) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Obtener ventas de los últimos 30 días
+    const salesById = await getSalesById(ml, 30);
+
+    // Procesar productos en batches
+    const alertProducts: AlertProduct[] = [];
     const batchSize = 20;
-    for (let i = 0; i < productsResult.results.length; i += batchSize) {
-      const batch = productsResult.results.slice(i, i + batchSize);
+
+    for (let i = 0; i < allProductIds.length; i += batchSize) {
+      const batch = allProductIds.slice(i, i + batchSize);
       const details = await ml.getProductsDetails(batch);
 
       for (const item of details) {
-        if (item.code === 200 && item.body.available_quantity <= STOCK_THRESHOLD) {
-          lowStockProducts.push({
+        if (item.code !== 200) continue;
+
+        const stock = item.body.available_quantity;
+        const ventas30d = salesById[item.body.id] || 0;
+        const dailySales = ventas30d / 30;
+        const daysOfStock = dailySales > 0 ? Math.round(stock / dailySales) : 999;
+
+        // NUEVO CRITERIO: Stock < Ventas30D = necesita alerta
+        // Determinar estado
+        let status: 'critical' | 'warning' | 'out_of_stock' | null = null;
+
+        if (stock === 0) {
+          status = 'out_of_stock';
+        } else if (stock < ventas30d * 0.5) {
+          // Stock cubre menos de 15 días = CRÍTICO
+          status = 'critical';
+        } else if (stock < ventas30d) {
+          // Stock cubre menos de 30 días = ALERTA
+          status = 'warning';
+        }
+        // Si stock >= ventas30d = saludable, no se incluye en alertas
+
+        if (status) {
+          alertProducts.push({
             id: item.body.id,
             title: item.body.title,
             sku: item.body.seller_custom_field,
-            stock: item.body.available_quantity,
+            stock,
+            ventas_30d: ventas30d,
             price: item.body.price,
             permalink: item.body.permalink,
             thumbnail: item.body.thumbnail,
             logistic_type: item.body.shipping?.logistic_type || null,
-            deficit: STOCK_THRESHOLD - item.body.available_quantity,
+            status,
+            days_of_stock: daysOfStock,
           });
         }
       }
 
-      // Rate limiting
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Ordenar por stock (más crítico primero)
-    lowStockProducts.sort((a, b) => a.stock - b.stock);
+    // Ordenar por urgencia (crítico primero, luego por días de stock)
+    alertProducts.sort((a, b) => {
+      const statusOrder = { 'out_of_stock': 0, 'critical': 1, 'warning': 2 };
+      const orderDiff = statusOrder[a.status] - statusOrder[b.status];
+      if (orderDiff !== 0) return orderDiff;
+      return a.days_of_stock - b.days_of_stock;
+    });
 
-    // Categorizar por urgencia
-    const urgent = lowStockProducts.filter(p => p.stock <= 1);
-    const warning = lowStockProducts.filter(p => p.stock > 1 && p.stock <= 3);
-    const low = lowStockProducts.filter(p => p.stock > 3 && p.stock <= STOCK_THRESHOLD);
+    // Categorizar
+    const outOfStock = alertProducts.filter(p => p.status === 'out_of_stock');
+    const critical = alertProducts.filter(p => p.status === 'critical');
+    const warning = alertProducts.filter(p => p.status === 'warning');
 
     return NextResponse.json({
       summary: {
-        total: lowStockProducts.length,
-        urgent: urgent.length,
+        total: alertProducts.length,
+        urgent: outOfStock.length + critical.length,
         warning: warning.length,
-        low: low.length,
-        threshold: STOCK_THRESHOLD,
+        low: 0, // Deprecated, mantenido por compatibilidad
+        // Nuevo desglose
+        out_of_stock: outOfStock.length,
+        critical: critical.length,
+      },
+      criteria: {
+        description: 'Criterio basado en cobertura de ventas',
+        rules: [
+          'Sin Stock: Stock = 0',
+          'Crítico: Stock < 50% de Ventas 30D (menos de 15 días)',
+          'Alerta: Stock < 100% de Ventas 30D (menos de 30 días)',
+          'Saludable: Stock >= Ventas 30D (no aparece en alertas)',
+        ],
       },
       alerts: {
-        urgent,
+        out_of_stock: outOfStock,
+        critical,
         warning,
-        low,
+        // Deprecated, mantenido por compatibilidad
+        urgent: [...outOfStock, ...critical],
+        low: [],
       },
-      products: lowStockProducts,
+      products: alertProducts,
       generated_at: new Date().toISOString(),
     });
   } catch (error) {

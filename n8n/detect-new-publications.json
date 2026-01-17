@@ -1,0 +1,320 @@
+{
+  "name": "BAZAR - Detectar Nuevas Publicaciones (Diario)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Diario 8 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "notes": "Se ejecuta a las 8 AM, 1 hora antes del cron de Vercel"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BAZAR_API_URL || 'https://bazar-inventory-dashboard.vercel.app'}}/api/products",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ids_only",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fetch-ml-ids",
+      "name": "Obtener IDs de ML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BAZAR_API_URL || 'https://bazar-inventory-dashboard.vercel.app'}}/api/sync-to-sheet",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-sheet-status",
+      "name": "Obtener Estado Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 200]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": []
+        },
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Combinar Datos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [440, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Comparar IDs de ML con IDs en el Sheet\nconst mlData = $input.all()[0].json;\nconst sheetData = $input.all()[1]?.json || {};\n\n// Obtener IDs de ML (activos)\nconst mlIds = new Set(mlData.product_ids || []);\n\n// Para una detección real, necesitaríamos leer el Sheet completo\n// Por ahora, retornamos info para trigger del sync si hay diferencias\n\nconst totalMLProducts = mlIds.size;\nconst sheetProducts = sheetData.stats?.total || 0;\n\n// Si hay más productos en ML que en Sheet, hay nuevos\nconst potentialNewProducts = Math.max(0, totalMLProducts - sheetProducts);\n\nreturn [{\n  json: {\n    ml_products: totalMLProducts,\n    sheet_products: sheetProducts,\n    potential_new: potentialNewProducts,\n    needs_sync: potentialNewProducts > 0,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "compare-ids",
+      "name": "Comparar IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needs_sync }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-new",
+      "name": "¿Hay nuevos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BAZAR_API_URL || 'https://bazar-inventory-dashboard.vercel.app'}}/api/sync-to-sheet",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "mode",
+              "value": "full"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "trigger-sync",
+      "name": "Disparar Sync Completo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "new-msg",
+              "name": "message",
+              "value": "=🆕 Nuevas publicaciones detectadas\n\n📊 ML: {{ $('Comparar IDs').item.json.ml_products }} productos\n📋 Sheet: {{ $('Comparar IDs').item.json.sheet_products }} productos\n➕ Nuevos: ~{{ $('Comparar IDs').item.json.potential_new }}\n\n✅ Sincronización completa iniciada\n🕐 {{ new Date().toLocaleString('es-CL') }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "format-new",
+      "name": "Formatear Nuevos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "no-new-msg",
+              "name": "message",
+              "value": "=📋 Sin publicaciones nuevas\n\n📊 ML: {{ $json.ml_products }} productos\n📋 Sheet: {{ $json.sheet_products }} productos\n\n✓ Todo sincronizado\n🕐 {{ new Date().toLocaleString('es-CL') }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "format-no-new",
+      "name": "Formatear Sin Nuevos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "notify-telegram",
+      "name": "Notificar Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1540, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Telegram Bot BAZAR"
+        }
+      },
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Diario 8 AM": {
+      "main": [
+        [
+          {
+            "node": "Obtener IDs de ML",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Obtener Estado Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener IDs de ML": {
+      "main": [
+        [
+          {
+            "node": "Combinar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener Estado Sheet": {
+      "main": [
+        [
+          {
+            "node": "Combinar Datos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combinar Datos": {
+      "main": [
+        [
+          {
+            "node": "Comparar IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comparar IDs": {
+      "main": [
+        [
+          {
+            "node": "¿Hay nuevos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay nuevos?": {
+      "main": [
+        [
+          {
+            "node": "Disparar Sync Completo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatear Sin Nuevos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Disparar Sync Completo": {
+      "main": [
+        [
+          {
+            "node": "Formatear Nuevos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Nuevos": {
+      "main": [
+        [
+          {
+            "node": "Notificar Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Sin Nuevos": {
+      "main": [
+        [
+          {
+            "node": "Notificar Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "BAZAR",
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "name": "Detección",
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}

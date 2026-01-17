@@ -1,0 +1,338 @@
+{
+  "name": "BAZAR - Sincronizar Ventas (Automático)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Cada 4 horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BAZAR_API_URL || 'https://bazar-inventory-dashboard.vercel.app'}}/api/orders",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "days",
+              "value": "30"
+            },
+            {
+              "name": "include_shipping",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "fetch-orders",
+      "name": "Obtener Órdenes 30D",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Procesar órdenes y agrupar ventas por producto y canal\nconst orders = $input.all()[0].json.orders || [];\n\nconst salesByProduct = {};\n\nfor (const order of orders) {\n  if (order.status === 'cancelled') continue;\n  \n  for (const item of order.order_items) {\n    const mlc = item.item.id;\n    \n    if (!salesByProduct[mlc]) {\n      salesByProduct[mlc] = {\n        mlc: mlc,\n        ventas_full: 0,\n        ventas_flex: 0,\n        ventas_xd: 0,\n        ventas_total: 0\n      };\n    }\n    \n    const qty = item.quantity;\n    const logisticType = order.shipping?.logistic_type || 'unknown';\n    \n    // Clasificar por tipo logístico\n    if (logisticType === 'fulfillment' || logisticType === 'cross_docking') {\n      salesByProduct[mlc].ventas_full += qty;\n    } else if (logisticType === 'self_service') {\n      salesByProduct[mlc].ventas_flex += qty;\n    } else if (logisticType === 'xd_drop_off' || logisticType === 'drop_off') {\n      salesByProduct[mlc].ventas_xd += qty;\n    } else {\n      // Si no se puede determinar, contar como FLEX\n      salesByProduct[mlc].ventas_flex += qty;\n    }\n    \n    salesByProduct[mlc].ventas_total += qty;\n  }\n}\n\nreturn Object.values(salesByProduct);"
+      },
+      "id": "process-sales",
+      "name": "Agrupar Ventas por Canal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{$env.BAZAR_API_URL || 'https://bazar-inventory-dashboard.vercel.app'}}/api/sync-to-sheet",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sales: $input.all().map(item => item.json) }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "update-sales",
+      "name": "Actualizar Ventas en Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-success",
+      "name": "¿Éxito?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "success-msg",
+              "name": "message",
+              "value": "=✅ Ventas sincronizadas correctamente\n\n📊 Productos actualizados: {{ $json.updated_count || 0 }}\n📈 Período: Últimos 30 días\n⏱️ Duración: {{ Math.round(($json.duration_ms || 0) / 1000) }}s\n🕐 {{ new Date().toLocaleString('es-CL') }}",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "name": "status",
+              "value": "success",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "format-success",
+      "name": "Formatear Éxito",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-msg",
+              "name": "message",
+              "value": "=❌ Error sincronizando ventas\n\n{{ $json.error || 'Error desconocido' }}\n🕐 {{ new Date().toLocaleString('es-CL') }}",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "name": "status",
+              "value": "error",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "format-error",
+      "name": "Formatear Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "notify-telegram-success",
+      "name": "Notificar Telegram (Éxito)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, -100],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Telegram Bot BAZAR"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "notify-telegram-error",
+      "name": "Notificar Telegram (Error)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Telegram Bot BAZAR"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log",
+              "name": "log",
+              "value": "=Sales sync completed: {{ $('Actualizar Ventas en Sheet').item.json.updated_count || 0 }} products updated",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "log-result",
+      "name": "Log Resultado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1540, 0]
+    }
+  ],
+  "connections": {
+    "Cada 4 horas": {
+      "main": [
+        [
+          {
+            "node": "Obtener Órdenes 30D",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener Órdenes 30D": {
+      "main": [
+        [
+          {
+            "node": "Agrupar Ventas por Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agrupar Ventas por Canal": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Ventas en Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Ventas en Sheet": {
+      "main": [
+        [
+          {
+            "node": "¿Éxito?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Éxito?": {
+      "main": [
+        [
+          {
+            "node": "Formatear Éxito",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatear Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Éxito": {
+      "main": [
+        [
+          {
+            "node": "Notificar Telegram (Éxito)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Error": {
+      "main": [
+        [
+          {
+            "node": "Notificar Telegram (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar Telegram (Éxito)": {
+      "main": [
+        [
+          {
+            "node": "Log Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar Telegram (Error)": {
+      "main": [
+        [
+          {
+            "node": "Log Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "BAZAR",
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "name": "Ventas",
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    },
+    {
+      "name": "Automático",
+      "createdAt": "2026-01-17T00:00:00.000Z",
+      "updatedAt": "2026-01-17T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}

@@ -11,6 +11,8 @@ interface ProductWithSales {
   sku: string | null;
   price: number;
   stock: number;
+  stock_full: number;    // Stock en bodega ML (FULL)
+  stock_flex: number;    // Stock en bodega propia (FLEX)
   status: string;
   category_id: string;
   logistic_type: string;
@@ -18,6 +20,45 @@ interface ProductWithSales {
   revenue_30d: number;
   costo: number;
   proveedor: string;
+  is_supermarket: boolean;  // Producto de categoría Supermarket
+  is_catalog: boolean;      // Publicación de catálogo
+  tags: string[];           // Tags: FULL, FLEX, Correo
+}
+
+// Categorías de Supermarket en Chile
+const SUPERMARKET_CATEGORIES = [
+  'MLC1403',    // Alimentos y Bebidas
+  'MLC432801',  // Supermercado
+  'MLC1246',    // Bebidas
+  'MLC1574',    // Hogar, Muebles y Jardín (algunos productos)
+];
+
+// Detectar si un producto es de categoría Supermarket
+function isSupermarketProduct(categoryId: string, listingType?: string, channels?: string[]): boolean {
+  // Por listing_type
+  if (listingType?.includes('supermarket')) return true;
+
+  // Por canal
+  if (channels?.includes('supermarket')) return true;
+
+  // Por categoría
+  if (SUPERMARKET_CATEGORIES.some(cat => categoryId?.startsWith(cat))) {
+    return true;
+  }
+
+  return false;
+}
+
+// Generar tags basados en stock y tipo de producto
+function generateProductTags(stockFull: number, stockFlex: number, isSupermarket: boolean): string[] {
+  const tags: string[] = [];
+
+  if (stockFull > 0) tags.push('FULL');
+
+  // Para Supermarket, no incluir FLEX (stock obsoleto que ML no permite modificar)
+  if (stockFlex > 0 && !isSupermarket) tags.push('FLEX');
+
+  return tags;
 }
 
 // Helper to get all sales aggregated by product ID
@@ -135,19 +176,49 @@ export async function GET(request: NextRequest) {
             : null;
           const costData = costByMl || costBySku || { costo: 0, proveedor: 'Sin asignar' };
 
+          const logisticType = item.body.shipping?.logistic_type || 'unknown';
+          const isSupermarket = isSupermarketProduct(
+            item.body.category_id,
+            (item.body as { listing_type_id?: string }).listing_type_id,
+            (item.body as { channels?: string[] }).channels
+          );
+
+          // Determinar stock por ubicación basado en logistic_type
+          // fulfillment = FULL, self_service = FLEX
+          const stockTotal = item.body.available_quantity;
+          let stockFull = 0;
+          let stockFlex = 0;
+
+          if (logisticType === 'fulfillment') {
+            stockFull = stockTotal;
+          } else if (logisticType === 'self_service') {
+            stockFlex = isSupermarket ? 0 : stockTotal; // Supermarket: ignorar FLEX
+          } else {
+            // Para otros tipos, asumir stock general
+            stockFull = stockTotal;
+          }
+
+          // Generar tags
+          const tags = generateProductTags(stockFull, stockFlex, isSupermarket);
+
           products.push({
             id: item.body.id,
             title: item.body.title,
             sku: item.body.seller_custom_field,
             price: item.body.price,
-            stock: item.body.available_quantity,
+            stock: isSupermarket ? stockFull : stockTotal, // Supermarket: solo contar FULL
+            stock_full: stockFull,
+            stock_flex: stockFlex,
             status: item.body.status,
             category_id: item.body.category_id,
-            logistic_type: item.body.shipping?.logistic_type || 'unknown',
+            logistic_type: logisticType,
             ventas_30d: 0,
             revenue_30d: 0,
             costo: costData.costo,
             proveedor: costData.proveedor,
+            is_supermarket: isSupermarket,
+            is_catalog: (item.body as { catalog_listing?: boolean }).catalog_listing || false,
+            tags,
           });
         }
       }
@@ -207,14 +278,19 @@ export async function GET(request: NextRequest) {
         title: productInfo.title || 'Producto sin stock',
         sku: productInfo.sku,
         price: productInfo.price,
-        stock: 0, // Stock cero
-        status: 'paused', // Probablemente pausado por falta de stock
+        stock: 0,
+        stock_full: 0,
+        stock_flex: 0,
+        status: 'paused',
         category_id: '',
         logistic_type: 'unknown',
         ventas_30d: salesData.quantity,
         revenue_30d: salesData.amount,
         costo: costData.costo,
         proveedor: costData.proveedor,
+        is_supermarket: false,
+        is_catalog: false,
+        tags: [],
       });
 
       console.log(`[Inventory] Added stock-zero product: ${itemId} with ${salesData.quantity} sales in 30D`);
@@ -228,14 +304,63 @@ export async function GET(request: NextRequest) {
 
     if (analysis === 'full' || analysis === 'summary') {
       const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
-      const totalRevenue = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
+      const totalStockFull = products.reduce((sum, p) => sum + p.stock_full, 0);
+      const totalStockFlex = products.reduce((sum, p) => sum + p.stock_flex, 0);
       const totalVentas30d = products.reduce((sum, p) => sum + p.ventas_30d, 0);
+
+      // Valorización por PRECIO DE VENTA (actual)
+      const valorizacionPorPrecio = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
+
+      // Valorización por COSTO (para efectos contables)
+      const valorizacionPorCosto = products.reduce((sum, p) => {
+        if (p.costo > 0) {
+          return sum + (p.costo * p.stock);
+        }
+        return sum;
+      }, 0);
+
+      // Valorización por UTILIDAD PROYECTADA
+      const ML_COMMISSION = 0.13;
+      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990');
+
+      const valorizacionPorUtilidad = products.reduce((sum, p) => {
+        if (p.costo > 0 && p.stock > 0) {
+          const shippingCost = p.logistic_type === 'self_service' && !p.is_supermarket ? FLEX_SHIPPING_COST : 0;
+          const commission = p.price * ML_COMMISSION;
+          const utilidadUnitaria = p.price - p.costo - shippingCost - commission;
+          return sum + (utilidadUnitaria * p.stock);
+        }
+        return sum;
+      }, 0);
+
+      // Contar productos por tipo
+      const productosConCosto = products.filter(p => p.costo > 0).length;
+      const productosSinCosto = products.filter(p => p.costo === 0).length;
+      const productosSupermarket = products.filter(p => p.is_supermarket).length;
+      const productosCatalogo = products.filter(p => p.is_catalog).length;
 
       response.summary = {
         stock_total: totalStock,
-        valorizacion_total: totalRevenue,
+        stock_full: totalStockFull,
+        stock_flex: totalStockFlex,
+
+        // Las 3 valorizaciones requeridas
+        valorizacion_por_precio: Math.round(valorizacionPorPrecio),
+        valorizacion_por_costo: Math.round(valorizacionPorCosto),
+        valorizacion_por_utilidad: Math.round(valorizacionPorUtilidad),
+
+        // Retrocompatibilidad
+        valorizacion_total: Math.round(valorizacionPorPrecio),
+
         ventas_30d_total: totalVentas30d,
-        ticket_promedio: products.length > 0 ? Math.round(totalRevenue / Math.max(totalStock, 1)) : 0,
+        ticket_promedio: products.length > 0 ? Math.round(valorizacionPorPrecio / Math.max(totalStock, 1)) : 0,
+
+        // Conteos adicionales
+        productos_total: products.length,
+        productos_con_costo: productosConCosto,
+        productos_sin_costo: productosSinCosto,
+        productos_supermarket: productosSupermarket,
+        productos_catalogo: productosCatalogo,
       };
     }
 
