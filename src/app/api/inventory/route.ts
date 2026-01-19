@@ -23,6 +23,7 @@ interface ProductWithSales {
   is_supermarket: boolean;  // Producto de categoría Supermarket
   is_catalog: boolean;      // Publicación de catálogo
   tags: string[];           // Tags: FULL, FLEX, Correo
+  user_product_id?: string; // ID para consultar stock por ubicación
 }
 
 // Categorías de Supermarket en Chile
@@ -183,7 +184,7 @@ export async function GET(request: NextRequest) {
             (item.body as { channels?: string[] }).channels
           );
 
-          // Determinar stock por ubicación basado en logistic_type
+          // Stock inicial basado en logistic_type (será actualizado después con datos reales)
           // fulfillment = FULL, self_service = FLEX
           const stockTotal = item.body.available_quantity;
           let stockFull = 0;
@@ -198,7 +199,10 @@ export async function GET(request: NextRequest) {
             stockFull = stockTotal;
           }
 
-          // Generar tags
+          // Extraer user_product_id si existe (para consultar stock por ubicación)
+          const userProductId = (item.body as { user_product_id?: string }).user_product_id || null;
+
+          // Generar tags (serán actualizados después si hay datos de stock por ubicación)
           const tags = generateProductTags(stockFull, stockFlex, isSupermarket);
 
           products.push({
@@ -219,12 +223,67 @@ export async function GET(request: NextRequest) {
             is_supermarket: isSupermarket,
             is_catalog: (item.body as { catalog_listing?: boolean }).catalog_listing || false,
             tags,
+            user_product_id: userProductId || undefined,
           });
         }
       }
 
       // Rate limiting
       await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // NUEVO: Obtener stock real por ubicación para productos con user_product_id
+    // Esto da el desglose correcto FULL vs FLEX
+    const productsWithUserProductId = products.filter(p => p.user_product_id);
+    if (productsWithUserProductId.length > 0) {
+      console.log(`[Inventory] Fetching stock by location for ${productsWithUserProductId.length} products...`);
+
+      // Procesar en batches de 10 para evitar rate limiting
+      const stockBatchSize = 10;
+      for (let i = 0; i < productsWithUserProductId.length; i += stockBatchSize) {
+        const batch = productsWithUserProductId.slice(i, i + stockBatchSize);
+
+        // Llamadas paralelas dentro del batch
+        const stockPromises = batch.map(async (product) => {
+          try {
+            const stockData = await ml.getUserProductStock(product.user_product_id!);
+            if (stockData) {
+              return {
+                id: product.id,
+                stockFull: stockData.meli_facility,
+                stockFlex: stockData.selling_address,
+              };
+            }
+          } catch (e) {
+            // Silently ignore errors - keep the original values
+          }
+          return null;
+        });
+
+        const stockResults = await Promise.all(stockPromises);
+
+        // Actualizar productos con datos reales de stock
+        for (const result of stockResults) {
+          if (result) {
+            const product = products.find(p => p.id === result.id);
+            if (product) {
+              product.stock_full = result.stockFull;
+              product.stock_flex = product.is_supermarket ? 0 : result.stockFlex;
+              product.stock = product.is_supermarket
+                ? result.stockFull
+                : result.stockFull + result.stockFlex;
+              // Regenerar tags con los nuevos valores
+              product.tags = generateProductTags(product.stock_full, product.stock_flex, product.is_supermarket);
+            }
+          }
+        }
+
+        // Rate limiting entre batches
+        if (i + stockBatchSize < productsWithUserProductId.length) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      console.log(`[Inventory] Stock by location fetched successfully`);
     }
 
     // Get sales data for last 30 days - using optimized method
