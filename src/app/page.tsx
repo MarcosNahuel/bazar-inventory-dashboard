@@ -33,32 +33,33 @@ function ProductTooltip({
   const fullTitle = tituloCompleto || titulo;
 
   return (
-    <div className="group relative">
-      <p className="text-sm font-medium text-gray-900 truncate max-w-[200px] cursor-pointer">
+    <div className="group/tooltip relative">
+      <p className="text-sm font-medium text-gray-900 truncate max-w-[200px] cursor-help underline decoration-dotted decoration-gray-400">
         {titulo}
       </p>
       <p className="text-xs text-gray-500">{codigoMl}</p>
 
-      {/* Tooltip que aparece al hacer hover */}
-      <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-50 w-64
-                      bg-white rounded-lg shadow-xl border border-gray-200 p-3
-                      transform transition-all duration-200">
+      {/* Tooltip que aparece al hacer hover - posición fija a la derecha */}
+      <div className="fixed invisible group-hover/tooltip:visible opacity-0 group-hover/tooltip:opacity-100
+                      z-[9999] w-72 bg-white rounded-xl shadow-2xl border border-gray-300 p-4
+                      transition-all duration-200 pointer-events-none"
+           style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
         {thumbnail && (
-          <div className="mb-2 flex justify-center">
-            <Image
+          <div className="mb-3 flex justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={thumbnail}
               alt={fullTitle}
-              width={120}
-              height={120}
-              className="rounded-md object-contain bg-gray-50"
-              unoptimized
+              width={150}
+              height={150}
+              className="rounded-lg object-contain bg-gray-100 border"
             />
           </div>
         )}
-        <p className="text-sm text-gray-900 font-medium leading-tight">
+        <p className="text-sm text-gray-900 font-semibold leading-tight text-center">
           {fullTitle}
         </p>
-        <p className="text-xs text-blue-600 mt-1">{codigoMl}</p>
+        <p className="text-xs text-blue-600 mt-2 text-center font-mono">{codigoMl}</p>
       </div>
     </div>
   );
@@ -586,10 +587,12 @@ export default function Dashboard() {
   const fetchData = async () => {
     try {
       setRefreshing(true);
+      // Forzar datos frescos sin caché del navegador
+      const fetchOptions = { cache: 'no-store' as RequestCache };
       const [statsRes, alertsRes, inventoryRes] = await Promise.all([
-        fetch('/api/stats'),
-        fetch('/api/alerts'),
-        fetch('/api/inventory?analysis=full').catch(() => null)
+        fetch('/api/stats', fetchOptions),
+        fetch('/api/alerts', fetchOptions),
+        fetch('/api/inventory?analysis=full', fetchOptions).catch(() => null)
       ]);
 
       if (!statsRes.ok || !alertsRes.ok) throw new Error('Error al cargar datos');
