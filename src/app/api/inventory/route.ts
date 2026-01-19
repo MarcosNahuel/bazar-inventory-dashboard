@@ -696,6 +696,8 @@ export async function GET(request: NextRequest) {
           flex: flexNeedRestock.map(p => ({
             codigo_ml: p.id,
             titulo: p.title.substring(0, 40),
+            titulo_completo: p.title,
+            thumbnail: p.thumbnail,
             stock: p.stock,
             ventas_30d: p.ventas_30d,
             sugerido_reponer: Math.max(p.ventas_30d - p.stock, 0),
@@ -704,6 +706,8 @@ export async function GET(request: NextRequest) {
           full: fullNeedRestock.map(p => ({
             codigo_ml: p.id,
             titulo: p.title.substring(0, 40),
+            titulo_completo: p.title,
+            thumbnail: p.thumbnail,
             stock: p.stock,
             ventas_30d: p.ventas_30d,
             sugerido_reponer: Math.max(p.ventas_30d - p.stock, 0),

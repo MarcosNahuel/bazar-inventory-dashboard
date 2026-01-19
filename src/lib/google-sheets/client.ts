@@ -95,8 +95,8 @@ export async function getCostsFromSheet(
       });
 
       // Mapear a CostData
-      // Soportar múltiples nombres de columnas: mlc, codigo_ml, numero_de_publicacion
-      const codigoML = obj.mlc || obj.codigo_ml || obj.numero_de_publicacion || '';
+      // Soportar múltiples nombres de columnas: mlc, codigo_ml, numero_de_publicacion, catalog_id
+      const codigoML = obj.mlc || obj.codigo_ml || obj.numero_de_publicacion || obj.catalog_id || '';
 
       if (obj.sku || codigoML) {
         // Parsear costo con formato chileno ($4.550 -> 4550)

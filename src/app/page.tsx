@@ -185,8 +185,8 @@ interface InventoryData {
     full: { name: string; productos: number; stock_total: number; ventas_30d: number; valorizacion: number; necesita_reposicion: number };
     other: { name: string; productos: number; stock_total: number; ventas_30d: number; valorizacion: number };
     products_to_restock: {
-      flex: Array<{ codigo_ml: string; titulo: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
-      full: Array<{ codigo_ml: string; titulo: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
+      flex: Array<{ codigo_ml: string; titulo: string; titulo_completo?: string; thumbnail?: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
+      full: Array<{ codigo_ml: string; titulo: string; titulo_completo?: string; thumbnail?: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
     };
   };
   suppliers: Array<{
@@ -204,6 +204,8 @@ interface InventoryData {
     top_profitable: Array<{
       codigo_ml: string;
       titulo: string;
+      titulo_completo?: string;
+      thumbnail?: string;
       precio: number;
       costo: number;
       comision?: number;
@@ -216,6 +218,8 @@ interface InventoryData {
     negative_margin: Array<{
       codigo_ml: string;
       titulo: string;
+      titulo_completo?: string;
+      thumbnail?: string;
       precio?: number;
       costo?: number;
       utilidad?: number;
@@ -1541,8 +1545,12 @@ export default function Dashboard() {
                               </span>
                             </td>
                             <td className="px-3 py-3">
-                              <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{p.titulo}</p>
-                              <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+                              <ProductTooltip
+                                titulo={p.titulo}
+                                tituloCompleto={p.titulo_completo}
+                                thumbnail={p.thumbnail}
+                                codigoMl={p.codigo_ml}
+                              />
                             </td>
                             <td className="px-3 py-3 text-sm text-gray-600">{p.proveedor || 'Sin asignar'}</td>
                             <td className="px-3 py-3 text-sm text-right text-gray-600">{p.stock}</td>
@@ -1711,8 +1719,12 @@ export default function Dashboard() {
                         {inventory.profitability.top_profitable.map((p, i) => (
                           <tr key={i} className="hover:bg-gray-50">
                             <td className="px-4 py-3">
-                              <p className="text-sm font-medium text-gray-900">{p.titulo}</p>
-                              <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+                              <ProductTooltip
+                                titulo={p.titulo}
+                                tituloCompleto={p.titulo_completo}
+                                thumbnail={p.thumbnail}
+                                codigoMl={p.codigo_ml}
+                              />
                             </td>
                             <td className="px-4 py-3 text-right text-sm text-gray-900">
                               ${p.precio.toLocaleString()}
@@ -1773,8 +1785,12 @@ export default function Dashboard() {
                           {inventory.profitability.negative_margin.map((p, i) => (
                             <tr key={i} className="hover:bg-red-50">
                               <td className="px-4 py-3">
-                                <p className="text-sm font-medium text-gray-900">{p.titulo}</p>
-                                <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+                                <ProductTooltip
+                                  titulo={p.titulo}
+                                  tituloCompleto={p.titulo_completo}
+                                  thumbnail={p.thumbnail}
+                                  codigoMl={p.codigo_ml}
+                                />
                               </td>
                               <td className="px-4 py-3 text-right text-sm text-gray-900">
                                 ${(p.precio || 0).toLocaleString()}
