@@ -107,12 +107,15 @@ export async function getCostsFromSheet(
           .replace(/,/g, '.');    // Cambiar coma a punto (decimales)
         const parsedCosto = parseFloat(cleanCosto) || 0;
 
+        // Soportar múltiples nombres de columna para proveedor
+        const proveedor = obj.proveedor || obj.marca || obj.supplier || obj.vendedor || obj.fabricante || '';
+
         data.push({
           sku: String(obj.sku || ''),
           codigoML: String(codigoML),
           titulo: String(obj.titulo || obj.título || obj.titulo_de_publicacion || ''),
           costo: parsedCosto,
-          proveedor: String(obj.proveedor || 'Sin Proveedor'),
+          proveedor: proveedor ? String(proveedor) : 'Sin Proveedor',
           cajaMaestra: obj.caja_maestra ? parseInt(String(obj.caja_maestra)) : undefined,
           ultimaActualizacion: obj.fecha_actualizacion || obj.ultima_actualizacion ? String(obj.fecha_actualizacion || obj.ultima_actualizacion) : undefined,
         });
