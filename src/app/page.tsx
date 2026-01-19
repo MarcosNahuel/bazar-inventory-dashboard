@@ -844,7 +844,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {inventory.suppliers.slice(0, 10).map((s, i) => (
+                      {inventory.suppliers.map((s, i) => (
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-6 py-4 font-medium text-gray-900">{s.proveedor}</td>
                           <td className="px-6 py-4 text-right text-gray-600">{s.productos}</td>

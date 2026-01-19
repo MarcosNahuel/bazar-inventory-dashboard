@@ -95,7 +95,10 @@ export async function getCostsFromSheet(
       });
 
       // Mapear a CostData
-      if (obj.sku || obj.codigo_ml) {
+      // Soportar múltiples nombres de columnas: mlc, codigo_ml, numero_de_publicacion
+      const codigoML = obj.mlc || obj.codigo_ml || obj.numero_de_publicacion || '';
+
+      if (obj.sku || codigoML) {
         // Parsear costo con formato chileno ($4.550 -> 4550)
         const rawCosto = String(obj.costo || '0');
         const cleanCosto = rawCosto
@@ -106,12 +109,12 @@ export async function getCostsFromSheet(
 
         data.push({
           sku: String(obj.sku || ''),
-          codigoML: String(obj.codigo_ml || obj.numero_de_publicacion || ''),
-          titulo: String(obj.titulo || obj.titulo_de_publicacion || ''),
+          codigoML: String(codigoML),
+          titulo: String(obj.titulo || obj.título || obj.titulo_de_publicacion || ''),
           costo: parsedCosto,
           proveedor: String(obj.proveedor || 'Sin Proveedor'),
           cajaMaestra: obj.caja_maestra ? parseInt(String(obj.caja_maestra)) : undefined,
-          ultimaActualizacion: obj.fecha_actualizacion ? String(obj.fecha_actualizacion) : undefined,
+          ultimaActualizacion: obj.fecha_actualizacion || obj.ultima_actualizacion ? String(obj.fecha_actualizacion || obj.ultima_actualizacion) : undefined,
         });
       }
     }
