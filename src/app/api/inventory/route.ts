@@ -24,6 +24,7 @@ interface ProductWithSales {
   is_catalog: boolean;      // Publicación de catálogo
   tags: string[];           // Tags: FULL, FLEX, Correo
   user_product_id?: string; // ID para consultar stock por ubicación
+  thumbnail?: string;       // URL de imagen miniatura para tooltip
 }
 
 // Categorías de Supermarket en Chile
@@ -35,7 +36,10 @@ const SUPERMARKET_CATEGORIES = [
 ];
 
 // Detectar si un producto es de categoría Supermarket
-function isSupermarketProduct(categoryId: string, listingType?: string, channels?: string[]): boolean {
+function isSupermarketProduct(categoryId: string, listingType?: string, channels?: string[], tags?: string[]): boolean {
+  // Por tags de ML (más confiable)
+  if (tags?.includes('supermarket_eligible')) return true;
+
   // Por listing_type
   if (listingType?.includes('supermarket')) return true;
 
@@ -181,7 +185,8 @@ export async function GET(request: NextRequest) {
           const isSupermarket = isSupermarketProduct(
             item.body.category_id,
             (item.body as { listing_type_id?: string }).listing_type_id,
-            (item.body as { channels?: string[] }).channels
+            (item.body as { channels?: string[] }).channels,
+            (item.body as { tags?: string[] }).tags
           );
 
           // Stock inicial basado en logistic_type (será actualizado después con datos reales)
@@ -224,6 +229,7 @@ export async function GET(request: NextRequest) {
             is_catalog: (item.body as { catalog_listing?: boolean }).catalog_listing || false,
             tags,
             user_product_id: userProductId || undefined,
+            thumbnail: item.body.thumbnail || undefined,
           });
         }
       }
@@ -454,6 +460,8 @@ export async function GET(request: NextRequest) {
         return {
           codigo_ml: p.id,
           titulo: p.title.substring(0, 50),
+          titulo_completo: p.title, // Título completo para tooltip
+          thumbnail: p.thumbnail,   // Imagen para tooltip
           ventas_30d: p.ventas_30d,
           stock: p.stock,
           proveedor: p.proveedor,
@@ -615,6 +623,8 @@ export async function GET(request: NextRequest) {
         return {
           codigo_ml: p.id,
           titulo: p.title.substring(0, 50),
+          titulo_completo: p.title, // Título completo para tooltip
+          thumbnail: p.thumbnail, // Imagen para tooltip
           stock: p.stock,
           ventas_30d: p.ventas_30d,
           days: daysOfStock,
@@ -746,6 +756,8 @@ export async function GET(request: NextRequest) {
           return {
             codigo_ml: p.id,
             titulo: p.title.substring(0, 50),
+            titulo_completo: p.title, // Título completo para tooltip
+            thumbnail: p.thumbnail,   // Imagen para tooltip
             precio: p.price,
             costo: p.costo,
             comision: Math.round(commission),

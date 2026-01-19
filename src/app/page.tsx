@@ -16,6 +16,53 @@ import {
   ProfitabilityChart
 } from '@/components/charts/SalesChart';
 import { CostUploader } from '@/components/CostUploader';
+import Image from 'next/image';
+
+// Componente de tooltip con imagen para productos
+function ProductTooltip({
+  titulo,
+  tituloCompleto,
+  thumbnail,
+  codigoMl
+}: {
+  titulo: string;
+  tituloCompleto?: string;
+  thumbnail?: string;
+  codigoMl: string;
+}) {
+  const fullTitle = tituloCompleto || titulo;
+
+  return (
+    <div className="group relative">
+      <p className="text-sm font-medium text-gray-900 truncate max-w-[200px] cursor-pointer">
+        {titulo}
+      </p>
+      <p className="text-xs text-gray-500">{codigoMl}</p>
+
+      {/* Tooltip que aparece al hacer hover */}
+      <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block z-50 w-64
+                      bg-white rounded-lg shadow-xl border border-gray-200 p-3
+                      transform transition-all duration-200">
+        {thumbnail && (
+          <div className="mb-2 flex justify-center">
+            <Image
+              src={thumbnail}
+              alt={fullTitle}
+              width={120}
+              height={120}
+              className="rounded-md object-contain bg-gray-50"
+              unoptimized
+            />
+          </div>
+        )}
+        <p className="text-sm text-gray-900 font-medium leading-tight">
+          {fullTitle}
+        </p>
+        <p className="text-xs text-blue-600 mt-1">{codigoMl}</p>
+      </div>
+    </div>
+  );
+}
 
 interface Stats {
   products: { total: number; stock_total: number; critical_count: number };
@@ -37,6 +84,8 @@ interface Alert {
 interface ParetoProduct {
   codigo_ml: string;
   titulo: string;
+  titulo_completo?: string;  // Título completo para tooltip
+  thumbnail?: string;        // Imagen para tooltip
   ventas_30d: number;
   stock: number;
   proveedor: string;
@@ -117,6 +166,8 @@ interface InventoryData {
     all_products?: Array<{
       codigo_ml: string;
       titulo: string;
+      titulo_completo?: string;  // Título completo para tooltip
+      thumbnail?: string;        // Imagen para tooltip
       stock: number;
       ventas_30d: number;
       days: number;
@@ -344,8 +395,12 @@ function ParetoSection({ pareto }: { pareto: InventoryData['pareto'] }) {
             <tr key={i} className="hover:bg-gray-50">
               <td className="px-3 py-3 text-sm font-bold text-blue-600">{i + 1}</td>
               <td className="px-3 py-3">
-                <p className="text-sm font-medium text-gray-900 truncate max-w-[180px]">{p.titulo}</p>
-                <p className="text-xs text-gray-500">{p.codigo_ml}</p>
+                <ProductTooltip
+                  titulo={p.titulo}
+                  tituloCompleto={p.titulo_completo}
+                  thumbnail={p.thumbnail}
+                  codigoMl={p.codigo_ml}
+                />
               </td>
               <td className="px-3 py-3 text-xs text-gray-600">{p.proveedor || 'Sin asignar'}</td>
               <td className="px-3 py-3 text-right text-sm text-gray-900">
@@ -1091,7 +1146,14 @@ export default function Dashboard() {
                                 item.status === 'out_of_stock' ? 'bg-gray-100' : ''
                               }`}>
                                 <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.codigo_ml}</td>
-                                <td className="px-3 py-2 text-sm text-gray-900 max-w-[200px] truncate">{item.titulo}</td>
+                                <td className="px-3 py-2">
+                                  <ProductTooltip
+                                    titulo={item.titulo}
+                                    tituloCompleto={item.titulo_completo}
+                                    thumbnail={item.thumbnail}
+                                    codigoMl={item.codigo_ml}
+                                  />
+                                </td>
                                 <td className="px-3 py-2 text-center">
                                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                                     item.logistic_type === 'self_service' ? 'bg-blue-100 text-blue-800' :
@@ -1158,7 +1220,14 @@ export default function Dashboard() {
                         ''
                       }`}>
                         <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.codigo_ml}</td>
-                        <td className="px-3 py-2 text-sm text-gray-900 max-w-[200px] truncate">{item.titulo}</td>
+                        <td className="px-3 py-2">
+                          <ProductTooltip
+                            titulo={item.titulo}
+                            tituloCompleto={item.titulo_completo}
+                            thumbnail={item.thumbnail}
+                            codigoMl={item.codigo_ml}
+                          />
+                        </td>
                         <td className="px-3 py-2 text-xs text-gray-600">{item.proveedor || 'Sin asignar'}</td>
                         <td className="px-3 py-2 text-center">
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
