@@ -14,7 +14,7 @@ export async function GET() {
     const totalActiveProducts = productsResult.paging.total;
 
     // Obtener detalles de los primeros 100
-    let products: Array<{ stock: number; price: number }> = [];
+    const products: Array<{ stock: number; price: number }> = [];
     if (productsResult.results.length > 0) {
       const batchSize = 20;
       for (let i = 0; i < Math.min(productsResult.results.length, 100); i += batchSize) {

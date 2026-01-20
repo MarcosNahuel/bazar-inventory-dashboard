@@ -58,7 +58,7 @@ const MOCK_COSTS: CostData[] = [
  */
 export async function getCostsFromSheet(
   spreadsheetId?: string,
-  range: string = 'Global!A:S'
+  range: string = 'Costos_Proveedores!A:Z'
 ): Promise<CostData[]> {
   const sheets = getGoogleSheetsClient();
   const sheetId = spreadsheetId || process.env.GOOGLE_SPREADSHEET_ID;
@@ -79,10 +79,14 @@ export async function getCostsFromSheet(
       return [];
     }
 
-    // Primera fila son headers
+    // Primera fila son headers (normalizar quitando acentos)
     const headers = rows[0].map((h: string) =>
-      h.toString().toLowerCase().replace(/\s+/g, '_')
+      h.toString().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+        .replace(/\s+/g, '_')
     );
+
+    console.log('[GoogleSheets] Headers encontrados:', headers.join(', '));
 
     // Mapear filas a objetos
     const data: CostData[] = [];
@@ -113,7 +117,7 @@ export async function getCostsFromSheet(
         data.push({
           sku: String(obj.sku || ''),
           codigoML: String(codigoML),
-          titulo: String(obj.titulo || obj.título || obj.titulo_de_publicacion || ''),
+          titulo: String(obj.titulo || obj.titulo_de_publicacion || ''),
           costo: parsedCosto,
           proveedor: proveedor ? String(proveedor) : 'Sin Proveedor',
           cajaMaestra: obj.caja_maestra ? parseInt(String(obj.caja_maestra)) : undefined,

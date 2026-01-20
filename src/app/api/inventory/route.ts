@@ -148,7 +148,7 @@ export async function GET(request: NextRequest) {
     console.log(`[Inventory] Fetched ${allProductIds.length} of ${totalProducts} total products`);
 
     // Cargar costos desde Google Sheets (cache de 15 min)
-    let costsMap: Map<string, { costo: number; proveedor: string }> = new Map();
+    const costsMap: Map<string, { costo: number; proveedor: string }> = new Map();
     try {
       const costs = await getCachedCosts();
       for (const cost of costs) {
