@@ -1274,7 +1274,7 @@ export default function Dashboard() {
                                   />
                                 </td>
                                 <td className="px-3 py-2 text-center">
-                                  {/* Mostrar FLEX/FULL o ambos si tiene stock en ambos */}
+                                  {/* Mostrar tipo basado en stock REAL, no logistic_type */}
                                   {(item.stock_flex ?? 0) > 0 && (item.stock_full ?? 0) > 0 ? (
                                     <div className="flex flex-col gap-1">
                                       <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
@@ -1284,12 +1284,17 @@ export default function Dashboard() {
                                         FULL
                                       </span>
                                     </div>
+                                  ) : (item.stock_flex ?? 0) > 0 ? (
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                      FLEX
+                                    </span>
+                                  ) : (item.stock_full ?? 0) > 0 ? (
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                      FULL
+                                    </span>
                                   ) : (
-                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                      isFlexLogisticType(item.logistic_type) ? 'bg-blue-100 text-blue-800' :
-                                      item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                                    }`}>
-                                      {isFlexLogisticType(item.logistic_type) ? 'FLEX' : item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                      -
                                     </span>
                                   )}
                                 </td>
@@ -1393,7 +1398,7 @@ export default function Dashboard() {
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-600">{item.proveedor || 'Sin asignar'}</td>
                         <td className="px-3 py-2 text-center">
-                          {/* Mostrar FLEX/FULL o ambos si tiene stock en ambos */}
+                          {/* Mostrar tipo basado en stock REAL, no logistic_type */}
                           {(item.stock_flex ?? 0) > 0 && (item.stock_full ?? 0) > 0 ? (
                             <div className="flex flex-col gap-1">
                               <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
@@ -1403,14 +1408,17 @@ export default function Dashboard() {
                                 FULL
                               </span>
                             </div>
+                          ) : (item.stock_flex ?? 0) > 0 ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                              FLEX
+                            </span>
+                          ) : (item.stock_full ?? 0) > 0 ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                              FULL
+                            </span>
                           ) : (
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              isFlexLogisticType(item.logistic_type) ? 'bg-blue-100 text-blue-800' :
-                              item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' :
-                              'bg-gray-100 text-gray-600'
-                            }`}>
-                              {isFlexLogisticType(item.logistic_type) ? 'FLEX' :
-                               item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                              -
                             </span>
                           )}
                         </td>

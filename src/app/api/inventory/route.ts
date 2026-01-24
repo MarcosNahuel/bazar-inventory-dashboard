@@ -209,18 +209,21 @@ export async function GET(request: NextRequest) {
           );
 
           // Stock inicial basado en logistic_type (será actualizado después con datos reales)
-          // fulfillment = FULL, self_service = FLEX
+          // fulfillment = FULL (Bodega ML), TODO lo demás = FLEX (Mi Bodega)
+          // Tipos FLEX: self_service, drop_off, xd_drop_off, cross_docking, agreement, custom, default, etc.
           const stockTotal = item.body.available_quantity;
           let stockFull = 0;
           let stockFlex = 0;
 
           if (logisticType === 'fulfillment') {
+            // Solo fulfillment va a Bodega ML
             stockFull = stockTotal;
-          } else if (isFlexLogisticType(logisticType)) {
-            stockFlex = isSupermarket ? 0 : stockTotal; // Supermarket: ignorar FLEX
           } else {
-            // Para otros tipos, asumir stock general
-            stockFull = stockTotal;
+            // Todo lo demás (drop_off, self_service, cross_docking, agreement, default, etc.)
+            // es stock en Mi Bodega (FLEX)
+            stockFlex = isSupermarket ? 0 : stockTotal;
+            // Para supermarket, poner en stock_full ya que FLEX no aplica
+            if (isSupermarket) stockFull = stockTotal;
           }
 
           // Extraer user_product_id(s) si existe (para consultar stock por ubicación)
