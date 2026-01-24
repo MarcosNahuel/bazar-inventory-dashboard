@@ -905,6 +905,8 @@ export async function GET(request: NextRequest) {
         ventas_30d: number;
         facturacion: number;     // Precio de venta × ventas_30d
         ingreso_neto: number;    // Facturación - comisiones
+        costo_envio: number;     // Costo de envío total
+        utilidad_sin_envio: number; // Ingreso neto - costos (sin envío)
         utilidad: number;        // Ingreso neto - costos - envíos
       }> = {};
 
@@ -920,6 +922,8 @@ export async function GET(request: NextRequest) {
             ventas_30d: 0,
             facturacion: 0,
             ingreso_neto: 0,
+            costo_envio: 0,
+            utilidad_sin_envio: 0,
             utilidad: 0,
           };
         }
@@ -953,11 +957,16 @@ export async function GET(request: NextRequest) {
         const costoEnvio = (p.logistic_type === 'self_service' && !p.is_supermarket)
           ? FLEX_SHIPPING_COST * p.ventas_30d
           : 0;
+        byProveedor[key].costo_envio += costoEnvio;
 
         // Costo total del producto
         const costoTotal = p.costo * p.ventas_30d;
 
-        // Utilidad (ingreso neto - costo - envío)
+        // Utilidad SIN envío (lo que el cliente está dispuesto a pagar)
+        const utilidadSinEnvio = ingresoNeto - costoTotal;
+        byProveedor[key].utilidad_sin_envio += utilidadSinEnvio;
+
+        // Utilidad CON envío (utilidad real)
         const utilidad = ingresoNeto - costoTotal - costoEnvio;
         byProveedor[key].utilidad += utilidad;
       }
@@ -968,6 +977,8 @@ export async function GET(request: NextRequest) {
           ...data,
           facturacion: Math.round(data.facturacion),
           ingreso_neto: Math.round(data.ingreso_neto),
+          costo_envio: Math.round(data.costo_envio),
+          utilidad_sin_envio: Math.round(data.utilidad_sin_envio),
           utilidad: Math.round(data.utilidad),
           rentabilidad: data.facturacion > 0
             ? Math.round((data.utilidad / data.facturacion) * 1000) / 10

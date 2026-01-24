@@ -230,7 +230,10 @@ interface InventoryData {
       thumbnail?: string;
       precio?: number;
       costo?: number;
+      comision?: number;
+      envio?: number;
       utilidad?: number;
+      utilidad_sin_envio?: number;
       rentabilidad: number;
     }>;
   };
@@ -1682,7 +1685,9 @@ export default function Dashboard() {
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Facturación</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingreso Neto</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad 30D</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-purple-600 uppercase" title="Costo de envío FLEX">Envío</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-blue-600 uppercase" title="Utilidad sin considerar envío">Util s/Envío</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-green-600 uppercase" title="Utilidad real (con envío)">Util c/Envío</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rent. (%)</th>
                       </tr>
                     </thead>
@@ -1697,6 +1702,8 @@ export default function Dashboard() {
                         ventas_30d: number;
                         facturacion?: number;
                         ingreso_neto?: number;
+                        costo_envio?: number;
+                        utilidad_sin_envio?: number;
                         utilidad?: number;
                         rentabilidad?: number;
                       }, i) => {
@@ -1722,6 +1729,16 @@ export default function Dashboard() {
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-medium text-indigo-600">
                             ${((s.ingreso_neto || 0) / 1000000).toFixed(2)}M
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-purple-600">
+                            ${((s.costo_envio || 0) / 1000000).toFixed(2)}M
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-medium">
+                            <span className={`${
+                              (s.utilidad_sin_envio || 0) >= 0 ? 'text-blue-600' : 'text-red-600'
+                            }`}>
+                              {(s.utilidad_sin_envio || 0) >= 0 ? '' : '-'}${Math.abs((s.utilidad_sin_envio || 0) / 1000000).toFixed(2)}M
+                            </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-bold">
                             <span className={`${
@@ -2084,7 +2101,8 @@ export default function Dashboard() {
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Costo</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Comisión</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Envío</th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Pérdida/U</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase" title="Sin costo de envío">Util s/Envío</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase" title="Con costo de envío">Util c/Envío</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">ROI</th>
                           </tr>
                         </thead>
@@ -2105,11 +2123,14 @@ export default function Dashboard() {
                               <td className="px-4 py-3 text-right text-sm text-gray-600">
                                 ${(p.costo || 0).toLocaleString()}
                               </td>
-                              <td className="px-4 py-3 text-right text-sm text-gray-500">
-                                $0
+                              <td className="px-4 py-3 text-right text-sm text-orange-600">
+                                ${(p.comision || 0).toLocaleString()}
                               </td>
                               <td className="px-4 py-3 text-right text-sm text-purple-600">
-                                $0
+                                ${(p.envio || 0).toLocaleString()}
+                              </td>
+                              <td className={`px-4 py-3 text-right text-sm font-medium ${(p.utilidad_sin_envio || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                ${(p.utilidad_sin_envio || 0).toLocaleString()}
                               </td>
                               <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
                                 ${(p.utilidad || 0).toLocaleString()}
