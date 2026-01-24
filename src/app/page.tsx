@@ -581,6 +581,9 @@ export default function Dashboard() {
   // Filtros de alertas
   const [alertsGroupByProveedor, setAlertsGroupByProveedor] = useState(false);
 
+  // Tab de valorización (precio, costo, utilidad)
+  const [valorizacionTab, setValorizacionTab] = useState<'precio' | 'costo' | 'utilidad'>('costo');
+
   // Initialize dark mode from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('darkMode');
@@ -1616,15 +1619,52 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Tabla de valorización por proveedor */}
+            {/* Tabla de valorización por proveedor con pestañas */}
             {inventory.suppliers && inventory.suppliers.length > 0 && (
               <div className="bg-white rounded-xl shadow-sm p-6">
-                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                  <Users className="w-5 h-5 text-indigo-500" />
-                  Análisis por Proveedor (30 días)
-                </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-indigo-500" />
+                    Valorización por Proveedor
+                  </h3>
+                  {/* Pestañas de tipo de valorización */}
+                  <div className="flex bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setValorizacionTab('precio')}
+                      className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        valorizacionTab === 'precio'
+                          ? 'bg-blue-500 text-white shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Por Venta
+                    </button>
+                    <button
+                      onClick={() => setValorizacionTab('costo')}
+                      className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        valorizacionTab === 'costo'
+                          ? 'bg-amber-500 text-white shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Por Costo
+                    </button>
+                    <button
+                      onClick={() => setValorizacionTab('utilidad')}
+                      className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        valorizacionTab === 'utilidad'
+                          ? 'bg-green-500 text-white shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Por Utilidad
+                    </button>
+                  </div>
+                </div>
                 <p className="text-sm text-gray-500 mb-4">
-                  Valorización a costo. Facturación, ingresos y utilidad basados en ventas 30D.
+                  {valorizacionTab === 'precio' && 'Valorización = Precio de venta × Stock. Valor de mercado potencial.'}
+                  {valorizacionTab === 'costo' && 'Valorización = Costo × Stock. Capital invertido en inventario.'}
+                  {valorizacionTab === 'utilidad' && 'Valorización = (Precio - Costo) × Stock. Ganancia potencial bruta.'}
                 </p>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1633,12 +1673,17 @@ export default function Dashboard() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Productos</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Stock</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valorización (Costo)</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D (uds)</th>
+                        <th className={`px-4 py-3 text-right text-xs font-medium uppercase ${
+                          valorizacionTab === 'precio' ? 'text-blue-600' :
+                          valorizacionTab === 'costo' ? 'text-amber-600' : 'text-green-600'
+                        }`}>
+                          Valorización ({valorizacionTab === 'precio' ? 'Venta' : valorizacionTab === 'costo' ? 'Costo' : 'Utilidad'})
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Facturación</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingreso Neto</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rentabilidad (%)</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad 30D</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rent. (%)</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -1647,20 +1692,31 @@ export default function Dashboard() {
                         productos: number;
                         stock_total: number;
                         valorizacion: number;
+                        valorizacion_precio?: number;
+                        valorizacion_utilidad?: number;
                         ventas_30d: number;
                         facturacion?: number;
                         ingreso_neto?: number;
                         utilidad?: number;
                         rentabilidad?: number;
-                      }, i) => (
+                      }, i) => {
+                        const valorActual = valorizacionTab === 'precio'
+                          ? (s.valorizacion_precio || 0)
+                          : valorizacionTab === 'costo'
+                          ? s.valorizacion
+                          : (s.valorizacion_utilidad || 0);
+                        return (
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-sm font-medium text-gray-900">{s.proveedor}</td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">{s.productos}</td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">{s.stock_total.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-purple-600">
-                            ${(s.valorizacion / 1000000).toFixed(2)}M
+                          <td className={`px-4 py-3 text-sm text-right font-medium ${
+                            valorizacionTab === 'precio' ? 'text-blue-600' :
+                            valorizacionTab === 'costo' ? 'text-amber-600' : 'text-green-600'
+                          }`}>
+                            ${(valorActual / 1000000).toFixed(2)}M
                           </td>
-                          <td className="px-4 py-3 text-sm text-right text-blue-600">{s.ventas_30d}</td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">{s.ventas_30d}</td>
                           <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
                             ${((s.facturacion || 0) / 1000000).toFixed(2)}M
                           </td>
@@ -1682,7 +1738,7 @@ export default function Dashboard() {
                             </span>
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>

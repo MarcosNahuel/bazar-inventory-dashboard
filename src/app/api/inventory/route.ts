@@ -899,7 +899,9 @@ export async function GET(request: NextRequest) {
       const byProveedor: Record<string, {
         productos: number;
         stock_total: number;
-        valorizacion: number;
+        valorizacion: number;         // Costo × stock
+        valorizacion_precio: number;  // Precio × stock
+        valorizacion_utilidad: number; // (Precio - Costo) × stock
         ventas_30d: number;
         facturacion: number;     // Precio de venta × ventas_30d
         ingreso_neto: number;    // Facturación - comisiones
@@ -913,6 +915,8 @@ export async function GET(request: NextRequest) {
             productos: 0,
             stock_total: 0,
             valorizacion: 0,
+            valorizacion_precio: 0,
+            valorizacion_utilidad: 0,
             ventas_30d: 0,
             facturacion: 0,
             ingreso_neto: 0,
@@ -922,9 +926,14 @@ export async function GET(request: NextRequest) {
         byProveedor[key].productos++;
         byProveedor[key].stock_total += p.stock;
 
+        // Valorización por precio de venta
+        byProveedor[key].valorizacion_precio += p.price * p.stock;
+
         // Valorización por costo
         if (p.costo > 0) {
           byProveedor[key].valorizacion += p.costo * p.stock;
+          // Valorización por utilidad (precio - costo) × stock
+          byProveedor[key].valorizacion_utilidad += (p.price - p.costo) * p.stock;
         }
 
         byProveedor[key].ventas_30d += p.ventas_30d;
