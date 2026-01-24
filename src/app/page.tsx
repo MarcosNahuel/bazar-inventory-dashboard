@@ -576,6 +576,7 @@ export default function Dashboard() {
   const [inventoryStatusFilter, setInventoryStatusFilter] = useState<string>('all');
   const [inventoryGroupByProveedor, setInventoryGroupByProveedor] = useState(false);
   const [inventoryMlcFilter, setInventoryMlcFilter] = useState<string>('');
+  const [inventoryNameFilter, setInventoryNameFilter] = useState<string>('');
 
   // Filtros de alertas
   const [alertsGroupByProveedor, setAlertsGroupByProveedor] = useState(false);
@@ -1017,11 +1018,12 @@ export default function Dashboard() {
             {/* Distribución FLEX vs FULL */}
             {inventory.logistics_distribution && (
               <div className="bg-white rounded-xl shadow-sm p-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
                   <Boxes className="w-5 h-5 text-indigo-600" />
                   Distribución por Modalidad de Envío
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <p className="text-xs text-gray-500 mb-4">* Un producto puede tener stock en ambas bodegas simultáneamente</p>
+                <div className={`grid grid-cols-1 gap-4 ${inventory.logistics_distribution.other.productos > 0 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
                   {/* FLEX Card */}
                   <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
                     <h4 className="font-semibold text-blue-800">{inventory.logistics_distribution.flex.name}</h4>
@@ -1052,16 +1054,18 @@ export default function Dashboard() {
                       )}
                     </div>
                   </div>
-                  {/* Otros Card */}
-                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
-                    <h4 className="font-semibold text-gray-800">{inventory.logistics_distribution.other.name}</h4>
-                    <div className="mt-2 space-y-1 text-sm">
-                      <p className="text-gray-700">Productos: <span className="font-bold">{inventory.logistics_distribution.other.productos}</span></p>
-                      <p className="text-gray-700">Stock: <span className="font-bold">{inventory.logistics_distribution.other.stock_total.toLocaleString()}</span></p>
-                      <p className="text-gray-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.other.ventas_30d}</span></p>
-                      <p className="text-gray-700">Valorización (Costo): <span className="font-bold">${inventory.logistics_distribution.other.valorizacion.toLocaleString()}</span></p>
+                  {/* Otros Card - Solo mostrar si hay productos */}
+                  {inventory.logistics_distribution.other.productos > 0 && (
+                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
+                      <h4 className="font-semibold text-gray-800">{inventory.logistics_distribution.other.name}</h4>
+                      <div className="mt-2 space-y-1 text-sm">
+                        <p className="text-gray-700">Productos: <span className="font-bold">{inventory.logistics_distribution.other.productos}</span></p>
+                        <p className="text-gray-700">Stock: <span className="font-bold">{inventory.logistics_distribution.other.stock_total.toLocaleString()}</span></p>
+                        <p className="text-gray-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.other.ventas_30d}</span></p>
+                        <p className="text-gray-700">Valorización (Costo): <span className="font-bold">${inventory.logistics_distribution.other.valorizacion.toLocaleString()}</span></p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1072,12 +1076,21 @@ export default function Dashboard() {
               const proveedores = [...new Set((inventory.stock_health.all_products || []).map(p => p.proveedor || 'Sin asignar'))].sort();
 
               // Filtrar productos
-              const normalizedMlcFilter = inventoryMlcFilter.trim().toLowerCase();
+              const mlcSearchTerm = inventoryMlcFilter.trim();
+              const mlcDigitsOnly = mlcSearchTerm.replace(/\D/g, ''); // Extraer solo dígitos
+              const nameSearchTerm = inventoryNameFilter.trim().toLowerCase();
+
               const filteredProducts = (inventory.stock_health.all_products || []).filter(item => {
                 const matchProveedor = inventoryProveedorFilter === 'all' || (item.proveedor || 'Sin asignar') === inventoryProveedorFilter;
                 const matchStatus = inventoryStatusFilter === 'all' || item.status === inventoryStatusFilter;
-                const matchMlc = !normalizedMlcFilter || item.codigo_ml.toLowerCase().includes(normalizedMlcFilter);
-                return matchProveedor && matchStatus && matchMlc;
+                // Búsqueda inteligente por MLC: busca en código completo o solo dígitos
+                const itemDigits = item.codigo_ml.replace(/\D/g, '');
+                const matchMlc = !mlcSearchTerm ||
+                  item.codigo_ml.toLowerCase().includes(mlcSearchTerm.toLowerCase()) ||
+                  itemDigits.includes(mlcDigitsOnly);
+                // Búsqueda por nombre
+                const matchName = !nameSearchTerm || item.titulo.toLowerCase().includes(nameSearchTerm);
+                return matchProveedor && matchStatus && matchMlc && matchName;
               });
 
               // Calcular totales de los filtrados
@@ -1120,8 +1133,18 @@ export default function Dashboard() {
                     <input
                       value={inventoryMlcFilter}
                       onChange={(e) => setInventoryMlcFilter(e.target.value)}
-                      placeholder="MLC123..."
-                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Ej: 123456 o MLC123..."
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-36 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  {/* Filtro por Nombre */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700">Nombre:</label>
+                    <input
+                      value={inventoryNameFilter}
+                      onChange={(e) => setInventoryNameFilter(e.target.value)}
+                      placeholder="Buscar producto..."
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-44 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
                   {/* Filtro por Proveedor */}
@@ -1172,12 +1195,13 @@ export default function Dashboard() {
                   </div>
 
                   {/* Limpiar filtros */}
-                  {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all' || inventoryMlcFilter.trim().length > 0) && (
+                  {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all' || inventoryMlcFilter.trim().length > 0 || inventoryNameFilter.trim().length > 0) && (
                     <button
                       onClick={() => {
                         setInventoryProveedorFilter('all');
                         setInventoryStatusFilter('all');
                         setInventoryMlcFilter('');
+                        setInventoryNameFilter('');
                       }}
                       className="text-sm text-blue-600 hover:text-blue-800 underline"
                     >
@@ -1187,7 +1211,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Totales de filtrado */}
-                {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all' || inventoryMlcFilter.trim().length > 0) && (
+                {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all' || inventoryMlcFilter.trim().length > 0 || inventoryNameFilter.trim().length > 0) && (
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <p className="text-sm font-medium text-blue-800">
                       Totales filtrados: {filteredTotals.productos} productos | Stock: {filteredTotals.stock.toLocaleString()} | Ventas 30D: {filteredTotals.ventas.toLocaleString()} | Valorización (Costo): ${filteredTotals.valorizacion.toLocaleString()}

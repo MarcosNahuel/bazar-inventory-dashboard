@@ -344,6 +344,60 @@ export async function GET(request: NextRequest) {
       console.log(`[Inventory] Stock by location fetched successfully`);
     }
 
+    // Fallback: Para productos sin user_product_ids, intentar obtener stock con getItemStockByLocation
+    const productsNeedingStockUpdate = products.filter(p =>
+      (!p.user_product_ids || p.user_product_ids.length === 0) &&
+      p.stock > 0 &&
+      (p.stock_flex === 0 || p.stock_full === 0) // Solo si no tiene desglose
+    );
+
+    if (productsNeedingStockUpdate.length > 0) {
+      console.log(`[Inventory] Fetching stock by location for ${productsNeedingStockUpdate.length} products without user_product_ids...`);
+
+      const fallbackBatchSize = 10;
+      for (let i = 0; i < productsNeedingStockUpdate.length; i += fallbackBatchSize) {
+        const batch = productsNeedingStockUpdate.slice(i, i + fallbackBatchSize);
+
+        const stockPromises = batch.map(async (product) => {
+          try {
+            const stockData = await ml.getItemStockByLocation(product.id);
+            if (stockData && (stockData.meli_facility > 0 || stockData.selling_address > 0)) {
+              return {
+                id: product.id,
+                stockFull: stockData.meli_facility,
+                stockFlex: stockData.selling_address,
+              };
+            }
+          } catch {
+            // Silently ignore
+          }
+          return null;
+        });
+
+        const results = await Promise.all(stockPromises);
+
+        for (const result of results) {
+          if (result) {
+            const product = products.find(p => p.id === result.id);
+            if (product) {
+              product.stock_full = result.stockFull;
+              product.stock_flex = product.is_supermarket ? 0 : result.stockFlex;
+              product.stock = product.is_supermarket
+                ? result.stockFull
+                : result.stockFull + result.stockFlex;
+              product.tags = generateProductTags(product.stock_full, product.stock_flex, product.is_supermarket);
+            }
+          }
+        }
+
+        // Rate limiting
+        if (i + fallbackBatchSize < productsNeedingStockUpdate.length) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      console.log(`[Inventory] Fallback stock fetch completed`);
+    }
+
     // Get sales data for last 30 days - using optimized method
     let salesById: Record<string, { quantity: number; amount: number }> = {};
     let productInfoFromSales: Record<string, { title: string; price: number; sku: string | null }> = {};

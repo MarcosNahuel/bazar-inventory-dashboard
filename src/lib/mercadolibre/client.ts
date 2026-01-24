@@ -274,6 +274,50 @@ class MercadoLibreClient {
     }
   }
 
+  // Obtener stock por ubicación directamente con item_id
+  async getItemStockByLocation(itemId: string) {
+    try {
+      const response = await this.request<{
+        id: string;
+        available_quantity: number;
+        locations?: Array<{
+          type: string;
+          available_quantity: number;
+        }>;
+      }>(`/items/${itemId}?attributes=id,available_quantity`);
+
+      // Intentar obtener desglose de ubicaciones usando endpoint de inventario
+      try {
+        const stockResponse = await this.request<{
+          available_quantity: number;
+          locations: Array<{
+            type: string;
+            quantity: number;
+          }>;
+        }>(`/inventories/${itemId}/stock/warehouse`);
+
+        if (stockResponse.locations) {
+          let stockFull = 0;
+          let stockFlex = 0;
+          for (const loc of stockResponse.locations) {
+            if (loc.type === 'meli_facility' || loc.type === 'default') {
+              stockFull += loc.quantity;
+            } else if (loc.type === 'selling_address') {
+              stockFlex += loc.quantity;
+            }
+          }
+          return { meli_facility: stockFull, selling_address: stockFlex, total: response.available_quantity };
+        }
+      } catch {
+        // Endpoint de inventario no disponible, intentar con /stock
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   // Obtener órdenes
   async getOrders(daysBack = 30, limit = 50, offset = 0) {
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000)
