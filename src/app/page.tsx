@@ -80,6 +80,7 @@ interface Alert {
   price: number;
   permalink: string;
   thumbnail: string;
+  proveedor?: string;
 }
 
 interface ParetoProduct {
@@ -1250,7 +1251,7 @@ export default function Dashboard() {
                                 </td>
                                 <td className="px-3 py-2 text-center">
                                   {/* Mostrar FLEX/FULL o ambos si tiene stock en ambos */}
-                                  {item.stock_flex > 0 && item.stock_full > 0 ? (
+                                  {(item.stock_flex ?? 0) > 0 && (item.stock_full ?? 0) > 0 ? (
                                     <div className="flex flex-col gap-1">
                                       <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
                                         FLEX
@@ -1270,21 +1271,21 @@ export default function Dashboard() {
                                 </td>
                                 <td className="px-3 py-2 text-center">
                                   {/* Mostrar desglose de stock si tiene en ambos */}
-                                  {item.stock_flex > 0 && item.stock_full > 0 ? (
+                                  {(item.stock_flex ?? 0) > 0 && (item.stock_full ?? 0) > 0 ? (
                                     <div className="flex flex-col gap-1">
                                       <span className={`px-2 py-1 rounded text-sm font-medium ${
-                                        item.stock_flex < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
-                                        item.stock_flex < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                        (item.stock_flex ?? 0) < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                        (item.stock_flex ?? 0) < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
                                         'bg-green-100 text-green-800'
                                       }`}>
-                                        {item.stock_flex}
+                                        {item.stock_flex ?? 0}
                                       </span>
                                       <span className={`px-2 py-1 rounded text-sm font-medium ${
-                                        item.stock_full < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
-                                        item.stock_full < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                        (item.stock_full ?? 0) < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                        (item.stock_full ?? 0) < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
                                         'bg-green-100 text-green-800'
                                       }`}>
-                                        {item.stock_full}
+                                        {item.stock_full ?? 0}
                                       </span>
                                     </div>
                                   ) : (
@@ -1369,7 +1370,7 @@ export default function Dashboard() {
                         <td className="px-3 py-2 text-xs text-gray-600">{item.proveedor || 'Sin asignar'}</td>
                         <td className="px-3 py-2 text-center">
                           {/* Mostrar FLEX/FULL o ambos si tiene stock en ambos */}
-                          {item.stock_flex > 0 && item.stock_full > 0 ? (
+                          {(item.stock_flex ?? 0) > 0 && (item.stock_full ?? 0) > 0 ? (
                             <div className="flex flex-col gap-1">
                               <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
                                 FLEX
@@ -1391,21 +1392,21 @@ export default function Dashboard() {
                         </td>
                         <td className="px-3 py-2 text-center">
                           {/* Mostrar desglose de stock si tiene en ambos */}
-                          {item.stock_flex > 0 && item.stock_full > 0 ? (
+                          {(item.stock_flex ?? 0) > 0 && (item.stock_full ?? 0) > 0 ? (
                             <div className="flex flex-col gap-1">
                               <span className={`px-2 py-1 rounded text-sm font-medium ${
-                                item.stock_flex < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
-                                item.stock_flex < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                (item.stock_flex ?? 0) < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                (item.stock_flex ?? 0) < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
                                 'bg-green-100 text-green-800'
                               }`}>
-                                {item.stock_flex}
+                                {item.stock_flex ?? 0}
                               </span>
                               <span className={`px-2 py-1 rounded text-sm font-medium ${
-                                item.stock_full < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
-                                item.stock_full < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                (item.stock_full ?? 0) < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                (item.stock_full ?? 0) < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
                                 'bg-green-100 text-green-800'
                               }`}>
-                                {item.stock_full}
+                                {item.stock_full ?? 0}
                               </span>
                             </div>
                           ) : (
@@ -1947,8 +1948,8 @@ export default function Dashboard() {
                               ${(p.envio || 0).toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <span className={`px-2 py-1 rounded text-sm font-medium ${(p.utilidad_sin_envio || p.utilidad) > 0 ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
-                                ${(p.utilidad_sin_envio || p.utilidad).toLocaleString()}
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${(p.utilidad + (p.envio || 0)) > 0 ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
+                                ${(p.utilidad + (p.envio || 0)).toLocaleString()}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right">
@@ -2017,10 +2018,10 @@ export default function Dashboard() {
                                 ${(p.costo || 0).toLocaleString()}
                               </td>
                               <td className="px-4 py-3 text-right text-sm text-gray-500">
-                                ${(p.comision || 0).toLocaleString()}
+                                $0
                               </td>
                               <td className="px-4 py-3 text-right text-sm text-purple-600">
-                                ${(p.envio || 0).toLocaleString()}
+                                $0
                               </td>
                               <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
                                 ${(p.utilidad || 0).toLocaleString()}
@@ -2122,7 +2123,7 @@ export default function Dashboard() {
 
                       if (alertsGroupByProveedor) {
                         // Agrupar por proveedor
-                        const grouped = productsToShow.reduce((acc, p: { proveedor?: string }) => {
+                        const grouped = productsToShow.reduce((acc, p) => {
                           const prov = p.proveedor || 'Sin asignar';
                           if (!acc[prov]) acc[prov] = [];
                           acc[prov].push(p);
@@ -2130,7 +2131,7 @@ export default function Dashboard() {
                         }, {} as Record<string, typeof productsToShow>);
 
                         return Object.entries(grouped).map(([proveedor, products]) => (
-                          <React.Fragment key={proveedor}>
+                          <div key={proveedor}>
                             <tr className="bg-indigo-50">
                               <td colSpan={8} className="px-4 py-2">
                                 <div className="flex items-center gap-2 font-semibold text-indigo-900">
@@ -2191,7 +2192,7 @@ export default function Dashboard() {
                                 </td>
                               </tr>
                             ))}
-                          </React.Fragment>
+                          </div>
                         ));
                       } else {
                         // Vista normal sin agrupar

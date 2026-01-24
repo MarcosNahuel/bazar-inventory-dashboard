@@ -1,0 +1,39 @@
+Hola Akshay! Revisamos todos los puntos que mencionaste y te cuento el estado:
+
+✅ *CORREGIDO:*
+
+1. *Supermercado* - MLC2888575494 ahora muestra "SÍ". Usamos el tag supermarket_eligible de ML que es más confiable. Detectamos 348 productos de supermercado.
+
+2. *Ventas = Unidades vendidas* - Ahora suma item.quantity de cada orden, no cuenta órdenes. Si alguien compra 10 unidades, se suman 10.
+
+3. *Ventas diferenciadas FULL/FLEX* - Consultamos cada shipment para obtener logistic.type y clasificamos:
+   • fulfillment → FULL
+   • drop_off, self_service → FLEX
+
+4. *Columna Logística normalizada* - Muestra "FULL" o "FLEX" en lugar de valores técnicos.
+
+5. *Tags* - Ahora genera: Supermercado, Full, Flex Activo, Catálogo, Thumb OK, Pausado, etc.
+
+⚠️ *PENDIENTE/LIMITACIONES:*
+
+1. *SKU vacío* - Los productos no tienen seller_custom_field configurado en Mercado Libre. Este campo debe llenarse manualmente en cada publicación de ML. La sincronización funciona, pero no hay datos que traer.
+
+2. *Convivencia FULL+FLEX (2 filas)* - El código está preparado para generar 2 filas cuando un producto tiene convivencia, pero ningún producto tiene el tag self_service_in que ML usa para indicar convivencia activa. MLC2888575494 tiene stock en ambas ubicaciones (FULL: 104, FLEX: 6) pero sin ese tag no se considera "en convivencia" según la API de ML.
+
+3. *Stock* - Algunos productos muestran 0 porque usamos la API de stock por ubicación.
+
+📊 *ESTADÍSTICAS DEL SYNC:*
+• Total productos: 905
+• FULL: 789 productos (4,500 unidades vendidas)
+• FLEX: 116 productos (136 unidades vendidas)
+• Supermercado: 348
+• Catálogo: 413
+• Con proveedor: 511
+
+🔜 *PRÓXIMOS PASOS SUGERIDOS:*
+
+1. Para los SKU: ¿Tienen un Excel o sistema con el mapeo MLC → SKU? Podríamos crear una tabla de referencia.
+
+2. Para agrupar catálogo + tradicional: ML tiene el campo catalog_product_id que indica qué publicaciones comparten el mismo producto de catálogo. Podríamos usar eso para agrupar.
+
+¿Querés que revisemos algún punto específico o que implementemos la agrupación por catalog_product_id?

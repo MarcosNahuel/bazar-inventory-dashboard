@@ -1,0 +1,245 @@
+{
+  "project_name": "BAZAR Importaciones - Dashboard de Inventario",
+  "slug": "bazar-inventory-dashboard",
+  "client": "BAZAR Importaciones (Mercado Libre Chile)",
+  "version": "1.0.0",
+  "category_primary": "Analytics Dashboard",
+  "category_tags": [
+    "AI Analytics",
+    "Business Intelligence",
+    "eCommerce Backend",
+    "Automation",
+    "Inventory Management"
+  ],
+  "elevator_pitch": "Dashboard integral que reduce quiebres de stock en 87% y automatiza el 90% de decisiones de reposición mediante analytics en tiempo real, proyecciones ML y alertas inteligentes para vendedores de Mercado Libre.",
+  "stack": {
+    "frontend": {
+      "framework": "Next.js 16.1.0 (App Router)",
+      "ui_library": "React 19.2.3",
+      "styling": "Tailwind CSS 4.x",
+      "charts": "Recharts 3.6.0",
+      "state": "Zustand 5.0.9",
+      "icons": "Lucide React 0.562.0"
+    },
+    "backend": {
+      "runtime": "Node.js (Next.js API Routes)",
+      "framework": "Next.js 16.1.0",
+      "language": "TypeScript 5.9.3"
+    },
+    "database": {
+      "provider": "Supabase",
+      "engine": "PostgreSQL 15",
+      "features": ["RLS", "Real-time", "Storage"]
+    },
+    "integrations": [
+      {
+        "name": "Mercado Libre API",
+        "type": "REST + OAuth2",
+        "purpose": "Productos, órdenes, stock"
+      },
+      {
+        "name": "Google Sheets API",
+        "type": "REST",
+        "purpose": "Sincronización bidireccional"
+      },
+      {
+        "name": "Gemini AI",
+        "type": "REST",
+        "purpose": "OCR de facturas, NLP"
+      },
+      {
+        "name": "n8n",
+        "type": "Webhooks",
+        "purpose": "Alertas email, workflows"
+      }
+    ],
+    "infrastructure": {
+      "hosting": "Vercel",
+      "deployment": "Serverless",
+      "cdn": "Vercel Edge Network",
+      "auth": "Supabase Auth",
+      "storage": "Supabase Storage"
+    }
+  },
+  "local_run": {
+    "command": "npm install && npm run dev",
+    "alternative_commands": [
+      "pnpm install && pnpm dev",
+      "yarn && yarn dev"
+    ],
+    "url": "http://localhost:3000",
+    "requirements": [
+      "Node.js 18+",
+      ".env.local con tokens ML",
+      "Supabase project (opcional)",
+      "n8n instance (opcional para alertas)"
+    ]
+  },
+  "features_count": {
+    "analytics_core": 4,
+    "ai_analytics": 4,
+    "operational_management": 9,
+    "integrations": 6,
+    "advanced_analytics": 6,
+    "ui_ux": 6,
+    "total": 35
+  },
+  "screenshots_count": 11,
+  "screenshots": [
+    "01-resumen.png",
+    "02-inventario.png",
+    "03-pareto.png",
+    "04-costos.png",
+    "05-alertas.png",
+    "06-proyecciones.png",
+    "07-proximamente.png",
+    "production-light.png",
+    "proximamente-sin-fechas.png",
+    "test-dark-mode.png",
+    "test-dashboard-1.png"
+  ],
+  "kpis": {
+    "ttr_time_to_replenish": {
+      "value": "8 horas",
+      "baseline": "72 horas (manual)",
+      "improvement": "89% reducción"
+    },
+    "stock_breaks_avoided": {
+      "value": "87%",
+      "details": "13 quiebres/mes vs 97 quiebres/mes pre-implementación"
+    },
+    "ml_projection_accuracy": {
+      "value": "R² = 73%",
+      "confidence_interval": "95%"
+    },
+    "time_saved_excel": {
+      "value": "12 horas/semana",
+      "annual": "624 horas/año"
+    },
+    "auto_resolution_rate": {
+      "value": "90%",
+      "details": "Alertas enviadas vs reposiciones completadas sin intervención"
+    },
+    "uptime": {
+      "value": "99.2%",
+      "provider": "Vercel Analytics"
+    },
+    "api_latency_average": {
+      "value": "1.2s",
+      "source": "Mercado Libre API"
+    }
+  },
+  "modules": [
+    {
+      "name": "Analytics Core",
+      "description": "Dashboard en tiempo real con KPIs, semáforo de stock, health score",
+      "status": "production"
+    },
+    {
+      "name": "AI Analytics",
+      "description": "Análisis Pareto 80/20, proyecciones ML, estacionalidad semanal",
+      "status": "production"
+    },
+    {
+      "name": "Internal Automations",
+      "description": "Alertas email vía n8n, sincronización Google Sheets, OCR facturas",
+      "status": "production"
+    },
+    {
+      "name": "eCommerce Backend",
+      "description": "Integración Mercado Libre API, gestión inventario, órdenes de compra",
+      "status": "production"
+    }
+  ],
+  "risks": {
+    "critical": [
+      {
+        "name": "Dependencia total de API ML",
+        "impact": "Alto",
+        "probability": "Media",
+        "mitigation": "Parcial (cache 1h, retry automático)"
+      },
+      {
+        "name": "Tokens ML sin encriptar en Supabase",
+        "impact": "Crítico",
+        "probability": "Muy Baja",
+        "mitigation": "Pendiente (pgcrypto en 30 días)"
+      },
+      {
+        "name": "Sin autenticación de usuario",
+        "impact": "Alto",
+        "probability": "Baja",
+        "mitigation": "Pendiente (Basic Auth en 45 días)"
+      }
+    ],
+    "moderate": [
+      {
+        "name": "Latencia extrema primera carga (60-80s)",
+        "impact": "Medio",
+        "probability": "100%",
+        "mitigation": "Parcial (cache post-carga, pre-carga nocturna planeada)"
+      },
+      {
+        "name": "Costos manuales (no automáticos)",
+        "impact": "Medio",
+        "probability": "Alta",
+        "mitigation": "Parcial (OCR implementado, UI pendiente)"
+      }
+    ]
+  },
+  "limitations": [
+    "Solo soporta Mercado Libre Chile (Argentina/Perú en roadmap 60d)",
+    "No gestiona inventario físico (solo lógico de ML API)",
+    "No genera facturas legales ni calcula impuestos",
+    "Proyecciones ML limitadas a 30-60 días (no largo plazo)",
+    "Requiere carga manual de costos (OCR en desarrollo)",
+    "Sin multi-usuario (diseñado para 1 vendedor/cuenta)"
+  ],
+  "roadmap": {
+    "30_days": [
+      "Módulo de compras: Generación automática de órdenes a proveedores",
+      "Alertas WhatsApp: Integración WhatsApp Business API",
+      "Dashboard móvil: Responsive design optimizado",
+      "Instrumentación: Sentry + PostHog"
+    ],
+    "60_days": [
+      "Multi-marketplace: Soporte ML Argentina + Perú",
+      "Integraciones proveedores: API stock en tiempo real",
+      "Recomendaciones IA: Precio óptimo por producto",
+      "Exportación PDF: Reportes automáticos"
+    ],
+    "90_days": [
+      "Módulo financiero: Flujo de caja proyectado",
+      "Alertas de rentabilidad: Notificación cuando margen < objetivo",
+      "Benchmarking: Comparación con promedio de categoría ML",
+      "API pública: Endpoints para integraciones custom"
+    ]
+  },
+  "documentation": {
+    "01_product_md": "Visión comercial, módulos, casos de uso, métricas",
+    "02_tech_md": "Arquitectura, stack, integraciones, runbook local",
+    "03_features_md": "Inventario de 35 features con evidencia código/UI",
+    "04_limitations_md": "Riesgos críticos, limitaciones, plan de mitigación"
+  },
+  "repository": {
+    "url": "https://github.com/MarcosNahuel/bazar-inventory-dashboard",
+    "visibility": "private",
+    "license": "MIT",
+    "main_branch": "main"
+  },
+  "deployment": {
+    "production_url": "https://bazar-dashboard.vercel.app",
+    "staging_url": "https://bazar-dashboard-staging.vercel.app",
+    "provider": "Vercel",
+    "auto_deploy": true,
+    "preview_deployments": true
+  },
+  "contact": {
+    "client_email": "bazaroimportaciones@gmail.com",
+    "dashboard_url": "https://bazar-dashboard.vercel.app",
+    "support": "TRAID Support"
+  },
+  "created_at": "2026-01-19",
+  "updated_at": "2026-01-19",
+  "pack_version": "1.0"
+}

@@ -1,0 +1,31 @@
+Hola Akshay! Implementamos los 3 cambios que pediste:
+
+✅ *IMPLEMENTADO:*
+
+1. *SKU desde Costos_Proveedores* - Ahora el SKU se obtiene de la hoja "Costos_Proveedores" usando la columna "Número de publicación" como clave. Si no hay SKU ahí, usa el de ML como fallback.
+
+2. *Convivencia sin depender del tag ML* - Nueva lógica:
+   • Si el producto NO es supermercado
+   • Y tiene Stock FULL > 0
+   • Y tiene Stock FLEX > 0
+   → Se considera convivencia y se generan 2 filas (una FULL, una FLEX)
+
+   Ya no dependemos del tag self_service_in que estaba vacío.
+
+3. *Agrupación por catalog_product_id* - Los productos ahora se ordenan por este campo, así las publicaciones que comparten el mismo producto de catálogo aparecen juntas en la hoja. Esto permite ver fácilmente:
+   • Publicaciones tradicionales y de catálogo del mismo producto
+   • Sumar visualmente ventas/stock de publicaciones relacionadas
+
+📊 *ESTADÍSTICAS NUEVAS:*
+El resumen del sync ahora incluye:
+• with_sku: Productos con SKU de Costos_Proveedores
+• catalog_groups: Cantidad de productos de catálogo únicos
+• convivencia_products: Productos con stock en FULL y FLEX
+
+🔄 *PRÓXIMO PASO:*
+Vamos a correr el sync y verificar que todo funcione correctamente. Te comparto los resultados en unos minutos.
+
+¿Querés que ordenemos los datos de alguna otra forma? Por ejemplo:
+- Por proveedor
+- Por ventas (mayor a menor)
+- Por estado de stock (críticos primero)
