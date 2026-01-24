@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
+import { getCachedCosts } from '@/lib/google-sheets/costs-cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -14,6 +15,7 @@ interface AlertProduct {
   permalink: string;
   thumbnail: string;
   logistic_type: string | null;
+  proveedor: string; // NUEVO: proveedor del producto
   status: 'critical' | 'warning' | 'out_of_stock';
   days_of_stock: number;
 }
@@ -56,6 +58,23 @@ export async function GET() {
     // Obtener ventas de los últimos 30 días
     const salesById = await getSalesById(ml, 30);
 
+    // Cargar costos desde Google Sheets para obtener proveedores
+    const costsMap: Map<string, { costo: number; proveedor: string }> = new Map();
+    try {
+      const costs = await getCachedCosts();
+      for (const cost of costs) {
+        if (cost.codigoML) {
+          costsMap.set(cost.codigoML.toLowerCase(), { costo: cost.costo, proveedor: cost.proveedor });
+        }
+        if (cost.sku) {
+          costsMap.set(cost.sku.toLowerCase(), { costo: cost.costo, proveedor: cost.proveedor });
+        }
+      }
+      console.log(`[Alerts] Loaded ${costs.length} costs from Google Sheets cache`);
+    } catch (e) {
+      console.error('[Alerts] Error loading costs:', e);
+    }
+
     // Procesar productos en batches
     const alertProducts: AlertProduct[] = [];
     const batchSize = 20;
@@ -88,6 +107,13 @@ export async function GET() {
         // Si stock >= ventas30d = saludable, no se incluye en alertas
 
         if (status) {
+          // Buscar proveedor por ID de ML o por SKU
+          const costByMl = costsMap.get(item.body.id.toLowerCase());
+          const costBySku = item.body.seller_custom_field
+            ? costsMap.get(item.body.seller_custom_field.toLowerCase())
+            : null;
+          const proveedor = (costByMl || costBySku)?.proveedor || 'Sin asignar';
+
           alertProducts.push({
             id: item.body.id,
             title: item.body.title,
@@ -98,6 +124,7 @@ export async function GET() {
             permalink: item.body.permalink,
             thumbnail: item.body.thumbnail,
             logistic_type: item.body.shipping?.logistic_type || null,
+            proveedor, // NUEVO: incluir proveedor
             status,
             days_of_stock: daysOfStock,
           });

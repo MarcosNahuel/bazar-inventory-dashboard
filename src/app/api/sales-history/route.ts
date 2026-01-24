@@ -3,10 +3,10 @@ import { getMercadoLibreClient } from '@/lib/mercadolibre/client';
 import { getCache, setCache } from '@/lib/cache/supabase-cache';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Allow up to 60 seconds for this endpoint
+export const maxDuration = 120; // Allow up to 120 seconds for this endpoint (increased for data-heavy operations)
 
-// TTL del caché: 2 horas (datos históricos cambian poco)
-const CACHE_TTL_SECONDS = 2 * 60 * 60;
+// TTL del caché: 24 horas (datos históricos cambian poco, cache más agresivo)
+const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
 interface MonthlySale {
   month: string;
@@ -40,7 +40,7 @@ interface SalesHistoryResponse {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const months = parseInt(searchParams.get('months') || '24'); // Default 24 months (2 years)
+    const months = parseInt(searchParams.get('months') || '12'); // Default 12 months (1 year) - optimizado para velocidad
     const forceRefresh = searchParams.get('refresh') === 'true';
 
     // Cache key basado en cantidad de meses
@@ -58,10 +58,13 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(`🔄 Obteniendo datos frescos de ML API (${months} meses)...`);
+    const startTime = Date.now();
     const ml = getMercadoLibreClient();
 
     // Get monthly sales series
-    const series = await ml.getMonthlySalesSeries(Math.min(months, 36)); // Max 3 years
+    const series = await ml.getMonthlySalesSeries(Math.min(months, 24)); // Max 2 years (optimizado)
+    const fetchDuration = Date.now() - startTime;
+    console.log(`✅ Datos de ML obtenidos en ${(fetchDuration / 1000).toFixed(1)}s`);
 
     // Calculate statistics
     const totalRevenue = series.reduce((sum, m) => sum + m.revenue, 0);

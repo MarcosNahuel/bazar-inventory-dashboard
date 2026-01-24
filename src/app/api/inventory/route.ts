@@ -22,8 +22,9 @@ interface ProductWithSales {
   proveedor: string;
   is_supermarket: boolean;  // Producto de categoría Supermarket
   is_catalog: boolean;      // Publicación de catálogo
+  catalog_product_id: string | null; // Catalog ID for grouping listings
   tags: string[];           // Tags: FULL, FLEX, Correo
-  user_product_id?: string; // ID para consultar stock por ubicación
+  user_product_ids?: string[]; // IDs para consultar stock por ubicación
   thumbnail?: string;       // URL de imagen miniatura para tooltip
 }
 
@@ -52,6 +53,20 @@ function isSupermarketProduct(categoryId: string, listingType?: string, channels
   }
 
   return false;
+}
+
+// Tipos logísticos que corresponden a stock en bodega propia (FLEX / Drop-off / Acordar)
+function isFlexLogisticType(logisticType: string | undefined): boolean {
+  if (!logisticType) return false;
+  return [
+    'self_service',
+    'drop_off',
+    'xd_drop_off',
+    'cross_docking',
+    'agreement',
+    'custom',
+    'not_specified',
+  ].includes(logisticType);
 }
 
 // Generar tags basados en stock y tipo de producto
@@ -121,6 +136,10 @@ export async function GET(request: NextRequest) {
 
     const ml = getMercadoLibreClient();
     const STOCK_THRESHOLD = parseInt(process.env.STOCK_ALERT_THRESHOLD || '5');
+
+    // Constantes globales de cálculo (evitar redefiniciones)
+    const ML_COMMISSION = 0.13; // 13% comisión ML
+    const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990'); // $2,990 por envío FLEX
 
     // Get ALL active products using pagination
     const allProductIds: string[] = [];
@@ -197,15 +216,23 @@ export async function GET(request: NextRequest) {
 
           if (logisticType === 'fulfillment') {
             stockFull = stockTotal;
-          } else if (logisticType === 'self_service') {
+          } else if (isFlexLogisticType(logisticType)) {
             stockFlex = isSupermarket ? 0 : stockTotal; // Supermarket: ignorar FLEX
           } else {
             // Para otros tipos, asumir stock general
             stockFull = stockTotal;
           }
 
-          // Extraer user_product_id si existe (para consultar stock por ubicación)
-          const userProductId = (item.body as { user_product_id?: string }).user_product_id || null;
+          // Extraer user_product_id(s) si existe (para consultar stock por ubicación)
+          const userProductIds = new Set<string>();
+          const userProductId = (item.body as { user_product_id?: string }).user_product_id;
+          if (userProductId) userProductIds.add(userProductId);
+          if (item.body.variations) {
+            for (const variation of item.body.variations) {
+              if (variation.user_product_id) userProductIds.add(variation.user_product_id);
+            }
+          }
+          const userProductIdsArray = userProductIds.size > 0 ? Array.from(userProductIds) : undefined;
 
           // Generar tags (serán actualizados después si hay datos de stock por ubicación)
           const tags = generateProductTags(stockFull, stockFlex, isSupermarket);
@@ -227,8 +254,9 @@ export async function GET(request: NextRequest) {
             proveedor: costData.proveedor,
             is_supermarket: isSupermarket,
             is_catalog: (item.body as { catalog_listing?: boolean }).catalog_listing || false,
+            catalog_product_id: item.body.catalog_product_id || null,
             tags,
-            user_product_id: userProductId || undefined,
+            user_product_ids: userProductIdsArray,
             thumbnail: item.body.thumbnail || undefined,
           });
         }
@@ -238,9 +266,9 @@ export async function GET(request: NextRequest) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // NUEVO: Obtener stock real por ubicación para productos con user_product_id
+    // NUEVO: Obtener stock real por ubicación para productos con user_product_ids
     // Esto da el desglose correcto FULL vs FLEX
-    const productsWithUserProductId = products.filter(p => p.user_product_id);
+    const productsWithUserProductId = products.filter(p => p.user_product_ids && p.user_product_ids.length > 0);
     if (productsWithUserProductId.length > 0) {
       console.log(`[Inventory] Fetching stock by location for ${productsWithUserProductId.length} products...`);
 
@@ -251,18 +279,42 @@ export async function GET(request: NextRequest) {
 
         // Llamadas paralelas dentro del batch
         const stockPromises = batch.map(async (product) => {
+          const userProductIds = product.user_product_ids || [];
+          if (userProductIds.length === 0) return null;
+
           try {
-            const stockData = await ml.getUserProductStock(product.user_product_id!);
-            if (stockData) {
+            const stockResults = await Promise.all(
+              userProductIds.map(async (userProductId) => {
+                try {
+                  return await ml.getUserProductStock(userProductId);
+                } catch {
+                  return null;
+                }
+              })
+            );
+
+            let stockFull = 0;
+            let stockFlex = 0;
+            let hasData = false;
+
+            for (const stockData of stockResults) {
+              if (!stockData) continue;
+              hasData = true;
+              stockFull += stockData.meli_facility;
+              stockFlex += stockData.selling_address;
+            }
+
+            if (hasData) {
               return {
                 id: product.id,
-                stockFull: stockData.meli_facility,
-                stockFlex: stockData.selling_address,
+                stockFull,
+                stockFlex,
               };
             }
-          } catch (e) {
+          } catch {
             // Silently ignore errors - keep the original values
           }
+
           return null;
         });
 
@@ -355,6 +407,7 @@ export async function GET(request: NextRequest) {
         proveedor: costData.proveedor,
         is_supermarket: false,
         is_catalog: false,
+        catalog_product_id: null,
         tags: [],
       });
 
@@ -368,10 +421,27 @@ export async function GET(request: NextRequest) {
     };
 
     if (analysis === 'full' || analysis === 'summary') {
+      const activeProducts = products.filter(p => p.status === 'active');
+      const catalogGroups = new Set(
+        activeProducts
+          .map(p => p.catalog_product_id)
+          .filter((id): id is string => Boolean(id))
+      );
+      const activeWithoutCatalog = activeProducts.filter(p => !p.catalog_product_id).length;
+      const productosUnicos = catalogGroups.size + activeWithoutCatalog;
       const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
       const totalStockFull = products.reduce((sum, p) => sum + p.stock_full, 0);
       const totalStockFlex = products.reduce((sum, p) => sum + p.stock_flex, 0);
       const totalVentas30d = products.reduce((sum, p) => sum + p.ventas_30d, 0);
+      const totalRevenue30d = products.reduce((sum, p) => sum + p.revenue_30d, 0);
+
+      const totalUtilidad30d = products.reduce((sum, p) => {
+        if (p.ventas_30d <= 0 || p.costo <= 0) return sum;
+        const shippingCost = p.logistic_type === 'self_service' && !p.is_supermarket ? FLEX_SHIPPING_COST : 0;
+        const commission = p.price * ML_COMMISSION;
+        const utilidadUnitaria = p.price - p.costo - shippingCost - commission;
+        return sum + (utilidadUnitaria * p.ventas_30d);
+      }, 0);
 
       // Valorización por PRECIO DE VENTA (actual)
       const valorizacionPorPrecio = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
@@ -385,8 +455,6 @@ export async function GET(request: NextRequest) {
       }, 0);
 
       // Valorización por UTILIDAD PROYECTADA
-      const ML_COMMISSION = 0.13;
-      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990');
 
       const valorizacionPorUtilidad = products.reduce((sum, p) => {
         if (p.costo > 0 && p.stock > 0) {
@@ -405,6 +473,8 @@ export async function GET(request: NextRequest) {
       const productosCatalogo = products.filter(p => p.is_catalog).length;
 
       response.summary = {
+        publicaciones_activas: totalProducts,
+        productos_unicos: productosUnicos,
         stock_total: totalStock,
         stock_full: totalStockFull,
         stock_flex: totalStockFlex,
@@ -418,6 +488,8 @@ export async function GET(request: NextRequest) {
         valorizacion_total: Math.round(valorizacionPorPrecio),
 
         ventas_30d_total: totalVentas30d,
+        revenue_30d_total: Math.round(totalRevenue30d),
+        utilidad_30d_total: Math.round(totalUtilidad30d),
         ticket_promedio: products.length > 0 ? Math.round(valorizacionPorPrecio / Math.max(totalStock, 1)) : 0,
 
         // Conteos adicionales
@@ -431,8 +503,6 @@ export async function GET(request: NextRequest) {
 
     if (analysis === 'full' || analysis === 'pareto') {
       // Pareto analysis (80/20 rule) - MEJORADO con 3 análisis: Ventas, Utilidad, ROI
-      const ML_COMMISSION = 0.13; // 13%
-      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990'); // $2,990 por envío FLEX
 
       // Función helper para calcular datos de un producto
       const calcProductData = (p: ProductWithSales) => {
@@ -590,6 +660,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (analysis === 'full' || analysis === 'stock_health') {
+
       // NUEVO CRITERIO: Stock >= Ventas30D = Saludable
       // Stock suficiente para cubrir las ventas del próximo mes
       const healthy = products.filter(p => p.stock >= p.ventas_30d && p.stock > 0).length;
@@ -617,8 +688,11 @@ export async function GET(request: NextRequest) {
           status = 'critical';
         }
 
-        // Calcular valorización de esta publicación
-        const valorizacion = p.price * p.stock;
+        // Calcular valorización a costo y ACOS máximo
+        const valorizacion = p.costo > 0 ? (p.costo * p.stock) : 0;
+        const shippingCost = p.logistic_type === 'self_service' && !p.is_supermarket ? FLEX_SHIPPING_COST : 0;
+        const utilidadUnitaria = p.price - p.costo - shippingCost;
+        const acosMax = p.price > 0 && p.costo > 0 ? (utilidadUnitaria / p.price) * 100 : null;
 
         return {
           codigo_ml: p.id,
@@ -626,14 +700,17 @@ export async function GET(request: NextRequest) {
           titulo_completo: p.title, // Título completo para tooltip
           thumbnail: p.thumbnail, // Imagen para tooltip
           stock: p.stock,
+          stock_full: p.stock_full,
+          stock_flex: p.stock_flex,
           ventas_30d: p.ventas_30d,
           days: daysOfStock,
           status,
           price: p.price,
-          valorizacion, // NUEVO: valorización por publicación
+          valorizacion, // NUEVO: valorización por publicación (costo)
           proveedor: p.proveedor, // NUEVO: proveedor real
           logistic_type: p.logistic_type, // FLEX/FULL para distribución
           costo: p.costo, // NUEVO: costo del producto
+          acos_max: acosMax !== null ? Math.round(acosMax * 10) / 10 : null,
         };
       }).sort((a, b) => {
         // Ordenar: critical primero, luego warning, luego out_of_stock, luego healthy, luego overstocked
@@ -656,32 +733,74 @@ export async function GET(request: NextRequest) {
         all_products: allProductsWithStatus, // NUEVO: todos los productos con estado
       };
 
-      // NUEVO: Distribución logística FLEX vs FULL
+      // NUEVO: Distribución logística FLEX vs FULL (solo activos)
       // fulfillment = FULL (bodega ML), self_service = FLEX (mi bodega), xd_drop_off = Paquete en correo
-      const flexProducts = products.filter(p => p.logistic_type === 'self_service');
-      const fullProducts = products.filter(p => p.logistic_type === 'fulfillment');
-      const otherProducts = products.filter(p => p.logistic_type !== 'self_service' && p.logistic_type !== 'fulfillment');
+      const activeProducts = products.filter(p => p.status === 'active');
+      const mainLogisticsProducts = activeProducts.filter(
+        p => isFlexLogisticType(p.logistic_type) || p.logistic_type === 'fulfillment'
+      );
+      const otherProducts = activeProducts.filter(
+        p => !isFlexLogisticType(p.logistic_type) && p.logistic_type !== 'fulfillment'
+      );
 
-      // Productos que necesitan reposición por modalidad
-      // Regla: Si Ventas 30D >= Stock → Reponer
-      const flexNeedRestock = flexProducts.filter(p => p.ventas_30d >= p.stock && p.ventas_30d > 0);
-      const fullNeedRestock = fullProducts.filter(p => p.ventas_30d >= p.stock && p.ventas_30d > 0);
+      const flexProducts = mainLogisticsProducts.filter(p => p.stock_flex > 0 && isFlexLogisticType(p.logistic_type));
+      const fullProducts = mainLogisticsProducts.filter(p => p.stock_full > 0);
+
+      let flexStockTotal = 0;
+      let flexVentasTotal = 0;
+      let flexValorizacionTotal = 0;
+      const flexNeedRestock: Array<{ product: ProductWithSales; ventas: number }> = [];
+
+      let fullStockTotal = 0;
+      let fullVentasTotal = 0;
+      let fullValorizacionTotal = 0;
+      const fullNeedRestock: Array<{ product: ProductWithSales; ventas: number }> = [];
+
+      for (const product of mainLogisticsProducts) {
+        const totalStock = product.stock_full + product.stock_flex;
+        const flexShare = totalStock > 0 ? (product.stock_flex / totalStock) : 0;
+        const fullShare = totalStock > 0 ? (product.stock_full / totalStock) : 0;
+        const ventasFlex = product.stock_flex > 0 ? product.ventas_30d * flexShare : 0;
+        const ventasFull = product.stock_full > 0 ? product.ventas_30d * fullShare : 0;
+
+        if (product.stock_flex > 0) {
+          flexStockTotal += product.stock_flex;
+          flexVentasTotal += ventasFlex;
+          if (product.costo > 0) {
+            flexValorizacionTotal += product.costo * product.stock_flex;
+          }
+          if (ventasFlex >= product.stock_flex && ventasFlex > 0) {
+            flexNeedRestock.push({ product, ventas: ventasFlex });
+          }
+        }
+
+        if (product.stock_full > 0) {
+          fullStockTotal += product.stock_full;
+          fullVentasTotal += ventasFull;
+          if (product.costo > 0) {
+            fullValorizacionTotal += product.costo * product.stock_full;
+          }
+          if (ventasFull >= product.stock_full && ventasFull > 0) {
+            fullNeedRestock.push({ product, ventas: ventasFull });
+          }
+        }
+      }
 
       response.logistics_distribution = {
         flex: {
           name: 'FLEX (Mi Bodega)',
           productos: flexProducts.length,
-          stock_total: flexProducts.reduce((sum, p) => sum + p.stock, 0),
-          ventas_30d: flexProducts.reduce((sum, p) => sum + p.ventas_30d, 0),
-          valorizacion: flexProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+          stock_total: flexStockTotal,
+          ventas_30d: Math.round(flexVentasTotal),
+          valorizacion: Math.round(flexValorizacionTotal),
           necesita_reposicion: flexNeedRestock.length,
         },
         full: {
           name: 'FULL (Bodega ML)',
           productos: fullProducts.length,
-          stock_total: fullProducts.reduce((sum, p) => sum + p.stock, 0),
-          ventas_30d: fullProducts.reduce((sum, p) => sum + p.ventas_30d, 0),
-          valorizacion: fullProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+          stock_total: fullStockTotal,
+          ventas_30d: Math.round(fullVentasTotal),
+          valorizacion: Math.round(fullValorizacionTotal),
           necesita_reposicion: fullNeedRestock.length,
         },
         other: {
@@ -689,29 +808,29 @@ export async function GET(request: NextRequest) {
           productos: otherProducts.length,
           stock_total: otherProducts.reduce((sum, p) => sum + p.stock, 0),
           ventas_30d: otherProducts.reduce((sum, p) => sum + p.ventas_30d, 0),
-          valorizacion: otherProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+          valorizacion: otherProducts.reduce((sum, p) => sum + (p.costo > 0 ? p.costo * p.stock : 0), 0),
         },
         // Productos a reponer con detalle
         products_to_restock: {
-          flex: flexNeedRestock.map(p => ({
-            codigo_ml: p.id,
-            titulo: p.title.substring(0, 40),
-            titulo_completo: p.title,
-            thumbnail: p.thumbnail,
-            stock: p.stock,
-            ventas_30d: p.ventas_30d,
-            sugerido_reponer: Math.max(p.ventas_30d - p.stock, 0),
-            proveedor: p.proveedor,
+          flex: flexNeedRestock.map(({ product, ventas }) => ({
+            codigo_ml: product.id,
+            titulo: product.title.substring(0, 40),
+            titulo_completo: product.title,
+            thumbnail: product.thumbnail,
+            stock: product.stock_flex,
+            ventas_30d: Math.round(ventas),
+            sugerido_reponer: Math.max(Math.round(ventas) - product.stock_flex, 0),
+            proveedor: product.proveedor,
           })),
-          full: fullNeedRestock.map(p => ({
-            codigo_ml: p.id,
-            titulo: p.title.substring(0, 40),
-            titulo_completo: p.title,
-            thumbnail: p.thumbnail,
-            stock: p.stock,
-            ventas_30d: p.ventas_30d,
-            sugerido_reponer: Math.max(p.ventas_30d - p.stock, 0),
-            proveedor: p.proveedor,
+          full: fullNeedRestock.map(({ product, ventas }) => ({
+            codigo_ml: product.id,
+            titulo: product.title.substring(0, 40),
+            titulo_completo: product.title,
+            thumbnail: product.thumbnail,
+            stock: product.stock_full,
+            ventas_30d: Math.round(ventas),
+            sugerido_reponer: Math.max(Math.round(ventas) - product.stock_full, 0),
+            proveedor: product.proveedor,
           })),
         },
       };
@@ -719,41 +838,91 @@ export async function GET(request: NextRequest) {
 
     if (analysis === 'full' || analysis === 'suppliers') {
       // Group by PROVEEDOR REAL (desde Google Sheets), no por logistic_type
-      const byProveedor: Record<string, { productos: number; stock_total: number; valorizacion: number; ventas_30d: number }> = {};
+
+      const byProveedor: Record<string, {
+        productos: number;
+        stock_total: number;
+        valorizacion: number;
+        ventas_30d: number;
+        facturacion: number;     // Precio de venta × ventas_30d
+        ingreso_neto: number;    // Facturación - comisiones
+        utilidad: number;        // Ingreso neto - costos - envíos
+      }> = {};
 
       for (const p of products) {
         const key = p.proveedor || 'Sin asignar';
         if (!byProveedor[key]) {
-          byProveedor[key] = { productos: 0, stock_total: 0, valorizacion: 0, ventas_30d: 0 };
+          byProveedor[key] = {
+            productos: 0,
+            stock_total: 0,
+            valorizacion: 0,
+            ventas_30d: 0,
+            facturacion: 0,
+            ingreso_neto: 0,
+            utilidad: 0,
+          };
         }
         byProveedor[key].productos++;
         byProveedor[key].stock_total += p.stock;
-        byProveedor[key].valorizacion += p.price * p.stock;
+
+        // Valorización por costo
+        if (p.costo > 0) {
+          byProveedor[key].valorizacion += p.costo * p.stock;
+        }
+
         byProveedor[key].ventas_30d += p.ventas_30d;
+
+        // Facturación (precio de venta × unidades vendidas)
+        const facturacion = p.price * p.ventas_30d;
+        byProveedor[key].facturacion += facturacion;
+
+        // Comisión ML
+        const comision = facturacion * ML_COMMISSION;
+
+        // Ingreso neto (facturación - comisión)
+        const ingresoNeto = facturacion - comision;
+        byProveedor[key].ingreso_neto += ingresoNeto;
+
+        // Costo de envío (solo para FLEX)
+        const costoEnvio = (p.logistic_type === 'self_service' && !p.is_supermarket)
+          ? FLEX_SHIPPING_COST * p.ventas_30d
+          : 0;
+
+        // Costo total del producto
+        const costoTotal = p.costo * p.ventas_30d;
+
+        // Utilidad (ingreso neto - costo - envío)
+        const utilidad = ingresoNeto - costoTotal - costoEnvio;
+        byProveedor[key].utilidad += utilidad;
       }
 
       response.suppliers = Object.entries(byProveedor)
         .map(([proveedor, data]) => ({
           proveedor,
           ...data,
+          facturacion: Math.round(data.facturacion),
+          ingreso_neto: Math.round(data.ingreso_neto),
+          utilidad: Math.round(data.utilidad),
+          rentabilidad: data.facturacion > 0
+            ? Math.round((data.utilidad / data.facturacion) * 1000) / 10
+            : 0,
           avg_value_per_product: data.productos > 0 ? Math.round(data.valorizacion / data.productos) : 0,
         }))
-        .sort((a, b) => b.ventas_30d - a.ventas_30d);
+        .sort((a, b) => b.facturacion - a.facturacion);
     }
 
     if (analysis === 'full' || analysis === 'profitability') {
       // Comisión de MercadoLibre (aproximada)
-      const ML_COMMISSION = 0.13; // 13%
-      const FLEX_SHIPPING_COST = parseInt(process.env.FLEX_SHIPPING_COST || '2990'); // $2,990 por envío FLEX
 
       // Calcular margen para cada producto con ventas
       const productsWithMargin = products
         .filter(p => p.ventas_30d > 0 && p.costo > 0)
         .map(p => {
-          const shippingCost = p.logistic_type === 'flex' ? FLEX_SHIPPING_COST : 0;
+          const shippingCost = (p.logistic_type === 'self_service' && !p.is_supermarket) ? FLEX_SHIPPING_COST : 0;
           const commission = p.price * ML_COMMISSION;
           const costoTotal = p.costo + shippingCost + commission;
           const utilidad = p.price - costoTotal;
+          const utilidadSinEnvio = p.price - p.costo - commission; // Utilidad sin considerar envío
           const rentabilidad = p.costo > 0 ? ((utilidad / p.costo) * 100) : 0;
           const utilidad30d = utilidad * p.ventas_30d;
 
@@ -766,7 +935,8 @@ export async function GET(request: NextRequest) {
             costo: p.costo,
             comision: Math.round(commission),
             envio: shippingCost,
-            utilidad: Math.round(utilidad),
+            utilidad: Math.round(utilidad), // Utilidad CON envío
+            utilidad_sin_envio: Math.round(utilidadSinEnvio), // Utilidad SIN envío
             rentabilidad: Math.round(rentabilidad * 10) / 10,
             utilidad_30d: Math.round(utilidad30d),
             ventas_30d: p.ventas_30d,

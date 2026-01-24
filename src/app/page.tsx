@@ -103,6 +103,8 @@ interface ParetoProduct {
 
 interface InventoryData {
   summary: {
+    publicaciones_activas?: number;
+    productos_unicos?: number;
     stock_total: number;
     stock_full?: number;
     stock_flex?: number;
@@ -111,6 +113,8 @@ interface InventoryData {
     valorizacion_por_costo?: number;
     valorizacion_por_utilidad?: number;
     ventas_30d_total: number;
+    revenue_30d_total?: number;
+    utilidad_30d_total?: number;
     ticket_promedio?: number;
     productos_total?: number;
     productos_con_costo?: number;
@@ -170,6 +174,8 @@ interface InventoryData {
       titulo_completo?: string;  // Título completo para tooltip
       thumbnail?: string;        // Imagen para tooltip
       stock: number;
+      stock_full?: number;
+      stock_flex?: number;
       ventas_30d: number;
       days: number;
       status: 'healthy' | 'warning' | 'critical' | 'out_of_stock' | 'overstocked';
@@ -178,6 +184,7 @@ interface InventoryData {
       proveedor: string;
       logistic_type: string;
       costo: number;
+      acos_max?: number | null;
     }>;
   };
   logistics_distribution?: {
@@ -567,6 +574,10 @@ export default function Dashboard() {
   const [inventoryProveedorFilter, setInventoryProveedorFilter] = useState<string>('all');
   const [inventoryStatusFilter, setInventoryStatusFilter] = useState<string>('all');
   const [inventoryGroupByProveedor, setInventoryGroupByProveedor] = useState(false);
+  const [inventoryMlcFilter, setInventoryMlcFilter] = useState<string>('');
+
+  // Filtros de alertas
+  const [alertsGroupByProveedor, setAlertsGroupByProveedor] = useState(false);
 
   // Initialize dark mode from localStorage
   useEffect(() => {
@@ -674,13 +685,17 @@ export default function Dashboard() {
     if (salesHistory) return; // Already loaded
     setSalesHistoryLoading(true);
     try {
-      const res = await fetch('/api/sales-history?months=24');
+      console.log('🔄 Cargando histórico de ventas...');
+      const res = await fetch('/api/sales-history?months=12'); // Reducido a 12 meses para mejor performance
       if (res.ok) {
         const data = await res.json();
+        console.log('✅ Histórico de ventas cargado:', data.from_cache ? '(desde caché)' : '(datos frescos)');
         setSalesHistory(data);
+      } else {
+        console.error('❌ Error HTTP al cargar histórico:', res.status, res.statusText);
       }
     } catch (err) {
-      console.error('Error loading sales history:', err);
+      console.error('❌ Error de red al cargar histórico de ventas:', err);
     } finally {
       setSalesHistoryLoading(false);
     }
@@ -724,6 +739,42 @@ export default function Dashboard() {
     { id: 'sales-history', label: 'Histórico', icon: Calendar },
     { id: 'coming-soon', label: 'Próximamente', icon: Rocket },
   ];
+
+  const publicacionesActivas = inventory?.summary?.publicaciones_activas ?? stats?.products.total ?? 0;
+  const productosActivos = inventory?.summary?.productos_unicos
+    ?? inventory?.summary?.productos_total
+    ?? publicacionesActivas;
+  const ventas30d = inventory?.summary?.ventas_30d_total ?? stats?.orders.total_30d ?? 0;
+  const facturado30d = inventory?.summary?.revenue_30d_total ?? 0;
+  const utilidad30d = inventory?.summary?.utilidad_30d_total ?? inventory?.profitability?.total_utilidad_30d ?? 0;
+
+  const isFlexLogisticType = (logisticType?: string) => {
+    if (!logisticType) return false;
+    return [
+      'self_service',
+      'drop_off',
+      'xd_drop_off',
+      'cross_docking',
+      'agreement',
+      'custom',
+      'not_specified',
+    ].includes(logisticType);
+  };
+
+  const getInventoryDisplayStock = (item: NonNullable<InventoryData['stock_health']['all_products']>[number]) => {
+    if (isFlexLogisticType(item.logistic_type)) {
+      return item.stock_flex ?? item.stock;
+    }
+    if (item.logistic_type === 'fulfillment') {
+      return item.stock_full ?? item.stock;
+    }
+    return item.stock;
+  };
+
+  const getInventoryDisplayValorizacion = (item: NonNullable<InventoryData['stock_health']['all_products']>[number]) => {
+    const displayStock = getInventoryDisplayStock(item);
+    return item.costo > 0 ? item.costo * displayStock : 0;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -796,8 +847,14 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <KPICard
                 title="Productos Activos"
-                value={stats?.products.total || 0}
-                subtitle={`Stock: ${inventory?.summary?.stock_total?.toLocaleString() || 0} uds`}
+                value={productosActivos.toLocaleString()}
+                subtitle={
+                  <div className="space-y-1">
+                    <p className="font-medium">Publicaciones: {publicacionesActivas.toLocaleString()}</p>
+                    <p className="text-xs text-gray-500">({productosActivos} únicos)</p>
+                    <p>Stock total: {inventory?.summary?.stock_total?.toLocaleString() || 0} uds</p>
+                  </div>
+                }
                 icon={Package}
                 color="blue"
               />
@@ -810,15 +867,26 @@ export default function Dashboard() {
               />
               <KPICard
                 title="Ventas 30 días"
-                value={inventory?.summary?.ventas_30d_total?.toLocaleString() || stats?.orders.total_30d || 0}
-                subtitle="unidades vendidas"
+                value={ventas30d.toLocaleString()}
+                subtitle={
+                  <div className="space-y-1">
+                    <p>Unidades vendidas</p>
+                    <p>Facturado 30D: ${facturado30d.toLocaleString()}</p>
+                    <p>Utilidad: {utilidad30d < 0 ? '-' : ''}${Math.abs(utilidad30d).toLocaleString()}</p>
+                  </div>
+                }
                 icon={ShoppingCart}
                 color="green"
               />
               <KPICard
-                title="Valorización"
-                value={`$${(inventory?.summary?.valorizacion_total || 0).toLocaleString()}`}
-                subtitle="CLP en inventario"
+                title="Valorización de Inventario"
+                value={`$${(inventory?.summary?.valorizacion_por_costo || 0).toLocaleString()}`}
+                subtitle={
+                  <div className="space-y-1">
+                    <p className="font-medium">Valorización a COSTO</p>
+                    <p className="text-xs text-gray-500">(Costo de compra × Stock)</p>
+                  </div>
+                }
                 icon={DollarSign}
                 color="yellow"
               />
@@ -960,7 +1028,7 @@ export default function Dashboard() {
                       <p className="text-blue-700">Productos: <span className="font-bold">{inventory.logistics_distribution.flex.productos}</span></p>
                       <p className="text-blue-700">Stock: <span className="font-bold">{inventory.logistics_distribution.flex.stock_total.toLocaleString()}</span></p>
                       <p className="text-blue-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.flex.ventas_30d}</span></p>
-                      <p className="text-blue-700">Valorización: <span className="font-bold">${inventory.logistics_distribution.flex.valorizacion.toLocaleString()}</span></p>
+                      <p className="text-blue-700">Valorización (Costo): <span className="font-bold">${inventory.logistics_distribution.flex.valorizacion.toLocaleString()}</span></p>
                       {inventory.logistics_distribution.flex.necesita_reposicion > 0 && (
                         <p className="text-red-600 font-semibold mt-2">
                           Reponer: {inventory.logistics_distribution.flex.necesita_reposicion} productos
@@ -975,7 +1043,7 @@ export default function Dashboard() {
                       <p className="text-green-700">Productos: <span className="font-bold">{inventory.logistics_distribution.full.productos}</span></p>
                       <p className="text-green-700">Stock: <span className="font-bold">{inventory.logistics_distribution.full.stock_total.toLocaleString()}</span></p>
                       <p className="text-green-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.full.ventas_30d}</span></p>
-                      <p className="text-green-700">Valorización: <span className="font-bold">${inventory.logistics_distribution.full.valorizacion.toLocaleString()}</span></p>
+                      <p className="text-green-700">Valorización (Costo): <span className="font-bold">${inventory.logistics_distribution.full.valorizacion.toLocaleString()}</span></p>
                       {inventory.logistics_distribution.full.necesita_reposicion > 0 && (
                         <p className="text-red-600 font-semibold mt-2">
                           Reponer: {inventory.logistics_distribution.full.necesita_reposicion} productos
@@ -990,7 +1058,7 @@ export default function Dashboard() {
                       <p className="text-gray-700">Productos: <span className="font-bold">{inventory.logistics_distribution.other.productos}</span></p>
                       <p className="text-gray-700">Stock: <span className="font-bold">{inventory.logistics_distribution.other.stock_total.toLocaleString()}</span></p>
                       <p className="text-gray-700">Ventas 30D: <span className="font-bold">{inventory.logistics_distribution.other.ventas_30d}</span></p>
-                      <p className="text-gray-700">Valorización: <span className="font-bold">${inventory.logistics_distribution.other.valorizacion.toLocaleString()}</span></p>
+                      <p className="text-gray-700">Valorización (Costo): <span className="font-bold">${inventory.logistics_distribution.other.valorizacion.toLocaleString()}</span></p>
                     </div>
                   </div>
                 </div>
@@ -1003,18 +1071,20 @@ export default function Dashboard() {
               const proveedores = [...new Set((inventory.stock_health.all_products || []).map(p => p.proveedor || 'Sin asignar'))].sort();
 
               // Filtrar productos
+              const normalizedMlcFilter = inventoryMlcFilter.trim().toLowerCase();
               const filteredProducts = (inventory.stock_health.all_products || []).filter(item => {
                 const matchProveedor = inventoryProveedorFilter === 'all' || (item.proveedor || 'Sin asignar') === inventoryProveedorFilter;
                 const matchStatus = inventoryStatusFilter === 'all' || item.status === inventoryStatusFilter;
-                return matchProveedor && matchStatus;
+                const matchMlc = !normalizedMlcFilter || item.codigo_ml.toLowerCase().includes(normalizedMlcFilter);
+                return matchProveedor && matchStatus && matchMlc;
               });
 
               // Calcular totales de los filtrados
               const filteredTotals = filteredProducts.reduce((acc, item) => ({
                 productos: acc.productos + 1,
-                stock: acc.stock + item.stock,
+                stock: acc.stock + getInventoryDisplayStock(item),
                 ventas: acc.ventas + item.ventas_30d,
-                valorizacion: acc.valorizacion + (item.valorizacion || 0)
+                valorizacion: acc.valorizacion + getInventoryDisplayValorizacion(item)
               }), { productos: 0, stock: 0, ventas: 0, valorizacion: 0 });
 
               // Agrupar por proveedor si está activo
@@ -1023,9 +1093,9 @@ export default function Dashboard() {
                     proveedor: prov,
                     products: filteredProducts.filter(p => (p.proveedor || 'Sin asignar') === prov),
                     totals: filteredProducts.filter(p => (p.proveedor || 'Sin asignar') === prov).reduce((acc, item) => ({
-                      stock: acc.stock + item.stock,
+                      stock: acc.stock + getInventoryDisplayStock(item),
                       ventas: acc.ventas + item.ventas_30d,
-                      valorizacion: acc.valorizacion + (item.valorizacion || 0)
+                      valorizacion: acc.valorizacion + getInventoryDisplayValorizacion(item)
                     }), { stock: 0, ventas: 0, valorizacion: 0 })
                   })).filter(g => g.products.length > 0)
                 : null;
@@ -1038,11 +1108,21 @@ export default function Dashboard() {
                   Todos los Productos ({filteredProducts.length}{filteredProducts.length !== (inventory.stock_health.all_products?.length || 0) ? ` de ${inventory.stock_health.all_products?.length}` : ''})
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  Ordenados por estado de urgencia (críticos primero). Incluye proveedor y valorización.
+                  Ordenados por estado de urgencia (críticos primero). Incluye proveedor y valorización (costo).
                 </p>
 
                 {/* Filtros */}
                 <div className="mt-4 flex flex-wrap gap-4 items-center">
+                  {/* Filtro por MLC */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700">MLC:</label>
+                    <input
+                      value={inventoryMlcFilter}
+                      onChange={(e) => setInventoryMlcFilter(e.target.value)}
+                      placeholder="MLC123..."
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
                   {/* Filtro por Proveedor */}
                   <div className="flex items-center gap-2">
                     <label className="text-sm font-medium text-gray-700">Proveedor:</label>
@@ -1091,11 +1171,12 @@ export default function Dashboard() {
                   </div>
 
                   {/* Limpiar filtros */}
-                  {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all') && (
+                  {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all' || inventoryMlcFilter.trim().length > 0) && (
                     <button
                       onClick={() => {
                         setInventoryProveedorFilter('all');
                         setInventoryStatusFilter('all');
+                        setInventoryMlcFilter('');
                       }}
                       className="text-sm text-blue-600 hover:text-blue-800 underline"
                     >
@@ -1105,10 +1186,10 @@ export default function Dashboard() {
                 </div>
 
                 {/* Totales de filtrado */}
-                {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all') && (
+                {(inventoryProveedorFilter !== 'all' || inventoryStatusFilter !== 'all' || inventoryMlcFilter.trim().length > 0) && (
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <p className="text-sm font-medium text-blue-800">
-                      Totales filtrados: {filteredTotals.productos} productos | Stock: {filteredTotals.stock.toLocaleString()} | Ventas 30D: {filteredTotals.ventas.toLocaleString()} | Valorización: ${filteredTotals.valorizacion.toLocaleString()}
+                      Totales filtrados: {filteredTotals.productos} productos | Stock: {filteredTotals.stock.toLocaleString()} | Ventas 30D: {filteredTotals.ventas.toLocaleString()} | Valorización (Costo): ${filteredTotals.valorizacion.toLocaleString()}
                     </p>
                   </div>
                 )}
@@ -1127,7 +1208,7 @@ export default function Dashboard() {
                         <div className="flex gap-4 text-sm text-gray-600">
                           <span>Stock: <strong>{group.totals.stock.toLocaleString()}</strong></span>
                           <span>Ventas 30D: <strong>{group.totals.ventas.toLocaleString()}</strong></span>
-                          <span>Valor: <strong>${group.totals.valorizacion.toLocaleString()}</strong></span>
+                          <span>Valor (Costo): <strong>${group.totals.valorizacion.toLocaleString()}</strong></span>
                         </div>
                       </div>
                       <div className="overflow-x-auto">
@@ -1141,7 +1222,8 @@ export default function Dashboard() {
                               <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
                               <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Días</th>
                               <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
-                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Valorización</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">ACOS max (%)</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Valorización (Costo)</th>
                               <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
                             </tr>
                           </thead>
@@ -1152,6 +1234,11 @@ export default function Dashboard() {
                                 item.status === 'warning' ? 'bg-yellow-50' :
                                 item.status === 'out_of_stock' ? 'bg-gray-100' : ''
                               }`}>
+                                {(() => {
+                                  const displayStock = getInventoryDisplayStock(item);
+                                  const displayValorizacion = getInventoryDisplayValorizacion(item);
+                                  return (
+                                    <>
                                 <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.codigo_ml}</td>
                                 <td className="px-3 py-2">
                                   <ProductTooltip
@@ -1162,21 +1249,53 @@ export default function Dashboard() {
                                   />
                                 </td>
                                 <td className="px-3 py-2 text-center">
-                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    item.logistic_type === 'self_service' ? 'bg-blue-100 text-blue-800' :
-                                    item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                                  }`}>
-                                    {item.logistic_type === 'self_service' ? 'FLEX' : item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
-                                  </span>
+                                  {/* Mostrar FLEX/FULL o ambos si tiene stock en ambos */}
+                                  {item.stock_flex > 0 && item.stock_full > 0 ? (
+                                    <div className="flex flex-col gap-1">
+                                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                        FLEX
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                        FULL
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                      isFlexLogisticType(item.logistic_type) ? 'bg-blue-100 text-blue-800' :
+                                      item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                      {isFlexLogisticType(item.logistic_type) ? 'FLEX' : item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="px-3 py-2 text-center">
-                                  <span className={`px-2 py-1 rounded text-sm font-medium ${
-                                    item.stock === 0 ? 'bg-gray-200 text-gray-600' :
-                                    item.stock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
-                                    item.stock < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
-                                  }`}>
-                                    {item.stock}
-                                  </span>
+                                  {/* Mostrar desglose de stock si tiene en ambos */}
+                                  {item.stock_flex > 0 && item.stock_full > 0 ? (
+                                    <div className="flex flex-col gap-1">
+                                      <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                        item.stock_flex < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                        item.stock_flex < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-green-100 text-green-800'
+                                      }`}>
+                                        {item.stock_flex}
+                                      </span>
+                                      <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                        item.stock_full < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                        item.stock_full < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-green-100 text-green-800'
+                                      }`}>
+                                        {item.stock_full}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                      displayStock === 0 ? 'bg-gray-200 text-gray-600' :
+                                      displayStock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                      displayStock < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                                    }`}>
+                                      {displayStock}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="px-3 py-2 text-center text-sm text-gray-600">{item.ventas_30d}</td>
                                 <td className="px-3 py-2 text-center">
@@ -1189,10 +1308,16 @@ export default function Dashboard() {
                                   </span>
                                 </td>
                                 <td className="px-3 py-2 text-right text-sm text-gray-900">${item.price.toLocaleString()}</td>
-                                <td className="px-3 py-2 text-right text-sm text-gray-600">${item.valorizacion?.toLocaleString() || 0}</td>
-                                <td className="px-3 py-2 text-center">
-                                  <StockStatusIndicator stock={item.stock} ventas30d={item.ventas_30d} statusOverride={item.status} />
+                                <td className="px-3 py-2 text-right text-sm text-gray-600">
+                                  {item.acos_max !== null && item.acos_max !== undefined ? `${item.acos_max.toFixed(1)}%` : '-'}
                                 </td>
+                                <td className="px-3 py-2 text-right text-sm text-gray-600">${displayValorizacion.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <StockStatusIndicator stock={displayStock} ventas30d={item.ventas_30d} statusOverride={item.status} />
+                                </td>
+                                    </>
+                                  );
+                                })()}
                               </tr>
                             ))}
                           </tbody>
@@ -1214,7 +1339,8 @@ export default function Dashboard() {
                       <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
                       <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Días</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
-                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valorización</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">ACOS max (%)</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valorización (Costo)</th>
                       <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
                     </tr>
                   </thead>
@@ -1226,6 +1352,11 @@ export default function Dashboard() {
                         item.status === 'out_of_stock' ? 'bg-gray-100' :
                         ''
                       }`}>
+                        {(() => {
+                          const displayStock = getInventoryDisplayStock(item);
+                          const displayValorizacion = getInventoryDisplayValorizacion(item);
+                          return (
+                            <>
                         <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.codigo_ml}</td>
                         <td className="px-3 py-2">
                           <ProductTooltip
@@ -1237,24 +1368,56 @@ export default function Dashboard() {
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-600">{item.proveedor || 'Sin asignar'}</td>
                         <td className="px-3 py-2 text-center">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                            item.logistic_type === 'self_service' ? 'bg-blue-100 text-blue-800' :
-                            item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
-                            {item.logistic_type === 'self_service' ? 'FLEX' :
-                             item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
-                          </span>
+                          {/* Mostrar FLEX/FULL o ambos si tiene stock en ambos */}
+                          {item.stock_flex > 0 && item.stock_full > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                FLEX
+                              </span>
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                FULL
+                              </span>
+                            </div>
+                          ) : (
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              isFlexLogisticType(item.logistic_type) ? 'bg-blue-100 text-blue-800' :
+                              item.logistic_type === 'fulfillment' ? 'bg-green-100 text-green-800' :
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {isFlexLogisticType(item.logistic_type) ? 'FLEX' :
+                               item.logistic_type === 'fulfillment' ? 'FULL' : 'Otro'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <span className={`px-2 py-1 rounded text-sm font-medium ${
-                            item.stock === 0 ? 'bg-gray-200 text-gray-600' :
-                            item.stock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
-                            item.stock < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            {item.stock}
-                          </span>
+                          {/* Mostrar desglose de stock si tiene en ambos */}
+                          {item.stock_flex > 0 && item.stock_full > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                item.stock_flex < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                item.stock_flex < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-green-100 text-green-800'
+                              }`}>
+                                {item.stock_flex}
+                              </span>
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                item.stock_full < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                                item.stock_full < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-green-100 text-green-800'
+                              }`}>
+                                {item.stock_full}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className={`px-2 py-1 rounded text-sm font-medium ${
+                              displayStock === 0 ? 'bg-gray-200 text-gray-600' :
+                              displayStock < item.ventas_30d * 0.5 ? 'bg-red-100 text-red-800' :
+                              displayStock < item.ventas_30d ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-green-100 text-green-800'
+                            }`}>
+                              {displayStock}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-center text-sm text-gray-600">{item.ventas_30d}</td>
                         <td className="px-3 py-2 text-center">
@@ -1271,15 +1434,21 @@ export default function Dashboard() {
                           ${item.price.toLocaleString()}
                         </td>
                         <td className="px-3 py-2 text-right text-sm text-gray-600">
-                          ${item.valorizacion?.toLocaleString() || 0}
+                          {item.acos_max !== null && item.acos_max !== undefined ? `${item.acos_max.toFixed(1)}%` : '-'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm text-gray-600">
+                          ${displayValorizacion.toLocaleString()}
                         </td>
                         <td className="px-3 py-2 text-center">
                           <StockStatusIndicator
-                            stock={item.stock}
+                            stock={displayStock}
                             ventas30d={item.ventas_30d}
                             statusOverride={item.status}
                           />
                         </td>
+                            </>
+                          );
+                        })()}
                       </tr>
                     ))}
                   </tbody>
@@ -1419,8 +1588,11 @@ export default function Dashboard() {
               <div className="bg-white rounded-xl shadow-sm p-6">
                 <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                   <Users className="w-5 h-5 text-indigo-500" />
-                  Valorización por Proveedor
+                  Análisis por Proveedor (30 días)
                 </h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Valorización a costo. Facturación, ingresos y utilidad basados en ventas 30D.
+                </p>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
@@ -1428,20 +1600,54 @@ export default function Dashboard() {
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Productos</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Stock</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valorización</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valorización (Costo)</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D (uds)</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Facturación</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingreso Neto</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rentabilidad (%)</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {inventory.suppliers.map((s, i) => (
+                      {inventory.suppliers.map((s: {
+                        proveedor: string;
+                        productos: number;
+                        stock_total: number;
+                        valorizacion: number;
+                        ventas_30d: number;
+                        facturacion?: number;
+                        ingreso_neto?: number;
+                        utilidad?: number;
+                        rentabilidad?: number;
+                      }, i) => (
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-sm font-medium text-gray-900">{s.proveedor}</td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">{s.productos}</td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">{s.stock_total.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-green-600">
+                          <td className="px-4 py-3 text-sm text-right font-medium text-purple-600">
                             ${(s.valorizacion / 1000000).toFixed(2)}M
                           </td>
                           <td className="px-4 py-3 text-sm text-right text-blue-600">{s.ventas_30d}</td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
+                            ${((s.facturacion || 0) / 1000000).toFixed(2)}M
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-indigo-600">
+                            ${((s.ingreso_neto || 0) / 1000000).toFixed(2)}M
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-bold">
+                            <span className={`${
+                              (s.utilidad || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {(s.utilidad || 0) >= 0 ? '' : '-'}${Math.abs((s.utilidad || 0) / 1000000).toFixed(2)}M
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-bold">
+                            <span className={`${
+                              (s.rentabilidad || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {(s.rentabilidad || 0).toFixed(1)}%
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1709,7 +1915,9 @@ export default function Dashboard() {
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Comisión</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad/U</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Envío</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Util. sin Envío</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Util. con Envío</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Utilidad 30D</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">ROI</th>
@@ -1734,6 +1942,14 @@ export default function Dashboard() {
                             </td>
                             <td className="px-4 py-3 text-right text-sm text-gray-500">
                               ${(p.comision || 0).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm text-purple-600">
+                              ${(p.envio || 0).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`px-2 py-1 rounded text-sm font-medium ${(p.utilidad_sin_envio || p.utilidad) > 0 ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
+                                ${(p.utilidad_sin_envio || p.utilidad).toLocaleString()}
+                              </span>
                             </td>
                             <td className="px-4 py-3 text-right">
                               <span className={`px-2 py-1 rounded text-sm font-medium ${p.utilidad > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -1777,6 +1993,8 @@ export default function Dashboard() {
                             <th className="px-4 py-3 text-left text-xs font-medium text-red-800 uppercase">Producto</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Precio</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Costo</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Comisión</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Envío</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">Pérdida/U</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-red-800 uppercase">ROI</th>
                           </tr>
@@ -1797,6 +2015,12 @@ export default function Dashboard() {
                               </td>
                               <td className="px-4 py-3 text-right text-sm text-gray-600">
                                 ${(p.costo || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-500">
+                                ${(p.comision || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-purple-600">
+                                ${(p.envio || 0).toLocaleString()}
                               </td>
                               <td className="px-4 py-3 text-right text-sm font-bold text-red-600">
                                 ${(p.utilidad || 0).toLocaleString()}
@@ -1860,12 +2084,30 @@ export default function Dashboard() {
               <div className="px-6 py-4 border-b bg-gray-50">
                 <h3 className="text-lg font-semibold text-gray-800">Productos que Necesitan Reposición</h3>
                 <p className="text-sm text-gray-500">Ordenados por urgencia (sin stock y críticos primero)</p>
+                {/* Toggle Agrupar por Proveedor */}
+                <div className="mt-3 flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">Agrupar por Proveedor:</label>
+                  <button
+                    onClick={() => {
+                      const currentValue = alertsGroupByProveedor;
+                      setAlertsGroupByProveedor(!currentValue);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      alertsGroupByProveedor
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {alertsGroupByProveedor ? 'Activado' : 'Desactivado'}
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Stock</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Ventas 30D</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Días Stock</th>
@@ -1875,7 +2117,85 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {alerts.products.slice(0, 50).map((product: { id: string; title: string; thumbnail: string; stock: number; ventas_30d?: number; days_of_stock?: number; price: number; status?: string; permalink: string }) => (
+                    {(() => {
+                      const productsToShow = alerts.products.slice(0, 50);
+
+                      if (alertsGroupByProveedor) {
+                        // Agrupar por proveedor
+                        const grouped = productsToShow.reduce((acc, p: { proveedor?: string }) => {
+                          const prov = p.proveedor || 'Sin asignar';
+                          if (!acc[prov]) acc[prov] = [];
+                          acc[prov].push(p);
+                          return acc;
+                        }, {} as Record<string, typeof productsToShow>);
+
+                        return Object.entries(grouped).map(([proveedor, products]) => (
+                          <React.Fragment key={proveedor}>
+                            <tr className="bg-indigo-50">
+                              <td colSpan={8} className="px-4 py-2">
+                                <div className="flex items-center gap-2 font-semibold text-indigo-900">
+                                  <Users className="w-4 h-4" />
+                                  {proveedor} ({products.length} productos)
+                                </div>
+                              </td>
+                            </tr>
+                            {products.map((product: { id: string; title: string; thumbnail: string; stock: number; ventas_30d?: number; days_of_stock?: number; price: number; status?: string; permalink: string; proveedor?: string }) => (
+                              <tr key={product.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center">
+                                    <img src={product.thumbnail} alt="" className="w-10 h-10 rounded-lg object-cover mr-3" />
+                                    <div>
+                                      <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{product.title}</p>
+                                      <p className="text-xs text-gray-500">{product.id}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-xs text-gray-600">{product.proveedor || 'Sin asignar'}</td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`px-3 py-1 rounded-full text-sm font-bold ${
+                                    product.stock === 0 ? 'bg-gray-800 text-white' :
+                                    product.stock < (product.ventas_30d || 0) * 0.5 ? 'bg-red-100 text-red-800' :
+                                    'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    {product.stock}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-center text-sm text-blue-600 font-medium">
+                                  {product.ventas_30d || 0}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                    (product.days_of_stock || 0) <= 7 ? 'bg-red-100 text-red-700' :
+                                    (product.days_of_stock || 0) <= 15 ? 'bg-orange-100 text-orange-700' :
+                                    'bg-yellow-100 text-yellow-700'
+                                  }`}>
+                                    {product.days_of_stock || 0} días
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right text-sm text-gray-900">
+                                  ${product.price.toLocaleString()}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <StockStatusIndicator
+                                    stock={product.stock}
+                                    ventas30d={product.ventas_30d}
+                                    statusOverride={product.status as 'critical' | 'warning' | 'out_of_stock' | undefined}
+                                    showLabel
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <a href={product.permalink} target="_blank" rel="noopener noreferrer"
+                                     className="text-blue-600 hover:text-blue-800">
+                                    <ExternalLink className="w-5 h-5 inline" />
+                                  </a>
+                                </td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        ));
+                      } else {
+                        // Vista normal sin agrupar
+                        return productsToShow.map((product: { id: string; title: string; thumbnail: string; stock: number; ventas_30d?: number; days_of_stock?: number; price: number; status?: string; permalink: string; proveedor?: string }) => (
                       <tr key={product.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <div className="flex items-center">
@@ -1886,6 +2206,7 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </td>
+                        <td className="px-4 py-3 text-xs text-gray-600">{product.proveedor || 'Sin asignar'}</td>
                         <td className="px-4 py-3 text-center">
                           <span className={`px-3 py-1 rounded-full text-sm font-bold ${
                             product.stock === 0 ? 'bg-gray-800 text-white' :
@@ -1925,7 +2246,9 @@ export default function Dashboard() {
                           </a>
                         </td>
                       </tr>
-                    ))}
+                        ));
+                      }
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -2531,7 +2854,7 @@ export default function Dashboard() {
                         <p className="text-xl font-bold text-gray-900">
                           ${salesHistory.statistics.total_revenue.toLocaleString('es-CL')}
                         </p>
-                        <p className="text-xs text-gray-400">Últimos 24 meses</p>
+                        <p className="text-xs text-gray-400">Últimos 12 meses</p>
                       </div>
                     </div>
                   </div>
@@ -2546,7 +2869,7 @@ export default function Dashboard() {
                         <p className="text-xl font-bold text-gray-900">
                           {salesHistory.statistics.total_orders.toLocaleString('es-CL')}
                         </p>
-                        <p className="text-xs text-gray-400">Últimos 24 meses</p>
+                        <p className="text-xs text-gray-400">Últimos 12 meses</p>
                       </div>
                     </div>
                   </div>
@@ -3017,7 +3340,7 @@ export default function Dashboard() {
 function KPICard({ title, value, subtitle, icon: Icon, color }: {
   title: string;
   value: string | number;
-  subtitle: string;
+  subtitle: React.ReactNode;
   icon: React.ElementType;
   color: 'blue' | 'red' | 'green' | 'yellow';
 }) {
@@ -3039,7 +3362,7 @@ function KPICard({ title, value, subtitle, icon: Icon, color }: {
           <Icon className="w-6 h-6" />
         </div>
       </div>
-      <p className="text-sm text-gray-500 mt-2">{subtitle}</p>
+      <div className="mt-2 text-sm text-gray-500">{subtitle}</div>
     </div>
   );
 }
