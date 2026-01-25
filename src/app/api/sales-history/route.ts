@@ -40,7 +40,7 @@ interface SalesHistoryResponse {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const months = parseInt(searchParams.get('months') || '12'); // Default 12 months (1 year) - optimizado para velocidad
+    const months = parseInt(searchParams.get('months') || '6'); // Default 6 months - optimizado para carga rápida
     const forceRefresh = searchParams.get('refresh') === 'true';
 
     // Cache key basado en cantidad de meses

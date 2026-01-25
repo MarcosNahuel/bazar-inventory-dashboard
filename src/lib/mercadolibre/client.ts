@@ -459,30 +459,24 @@ class MercadoLibreClient {
     return allOrders;
   }
 
-  // Obtener serie temporal de ventas mensuales
-  async getMonthlySalesSeries(months = 24) {
-    const series: Array<{
-      month: string;
-      year: number;
-      month_num: number;
-      orders_count: number;
-      units_sold: number;
-      revenue: number;
-      avg_ticket: number;
-    }> = [];
-
+  // Obtener serie temporal de ventas mensuales (OPTIMIZADO con paralelización)
+  async getMonthlySalesSeries(months = 12) {
     const now = new Date();
+    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-    // Iterar mes por mes hacia atrás
+    // Preparar todos los meses a procesar
+    const monthsToProcess = [];
     for (let i = 0; i < months; i++) {
       const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const nextMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-
-      const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
       const monthKey = `${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
+      monthsToProcess.push({ index: i, targetDate, nextMonth, monthKey });
+    }
 
+    // Función para procesar un mes
+    const processMonth = async (monthData: { index: number; targetDate: Date; nextMonth: Date; monthKey: string }) => {
       try {
-        const orders = await this.getAllOrdersByDateRange(targetDate, nextMonth, 5000);
+        const orders = await this.getAllOrdersByDateRange(monthData.targetDate, monthData.nextMonth, 2000);
 
         let totalUnits = 0;
         let totalRevenue = 0;
@@ -498,33 +492,63 @@ class MercadoLibreClient {
           }
         }
 
-        series.unshift({
-          month: monthKey,
-          year: targetDate.getFullYear(),
-          month_num: targetDate.getMonth() + 1,
+        return {
+          index: monthData.index,
+          month: monthData.monthKey,
+          year: monthData.targetDate.getFullYear(),
+          month_num: monthData.targetDate.getMonth() + 1,
           orders_count: validOrders,
           units_sold: totalUnits,
           revenue: Math.round(totalRevenue),
           avg_ticket: validOrders > 0 ? Math.round(totalRevenue / validOrders) : 0
-        });
+        };
       } catch (error) {
-        console.error(`Error fetching month ${monthKey}:`, error);
-        series.unshift({
-          month: monthKey,
-          year: targetDate.getFullYear(),
-          month_num: targetDate.getMonth() + 1,
+        console.error(`Error fetching month ${monthData.monthKey}:`, error);
+        return {
+          index: monthData.index,
+          month: monthData.monthKey,
+          year: monthData.targetDate.getFullYear(),
+          month_num: monthData.targetDate.getMonth() + 1,
           orders_count: 0,
           units_sold: 0,
           revenue: 0,
           avg_ticket: 0
-        });
+        };
       }
+    };
 
-      // Rate limiting entre meses
-      await new Promise(resolve => setTimeout(resolve, 200));
+    // Procesar en batches paralelos de 3 meses para no saturar la API
+    const BATCH_SIZE = 3;
+    const results: Array<{
+      index: number;
+      month: string;
+      year: number;
+      month_num: number;
+      orders_count: number;
+      units_sold: number;
+      revenue: number;
+      avg_ticket: number;
+    }> = [];
+
+    for (let i = 0; i < monthsToProcess.length; i += BATCH_SIZE) {
+      const batch = monthsToProcess.slice(i, i + BATCH_SIZE);
+      console.log(`📊 Procesando batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(monthsToProcess.length / BATCH_SIZE)} (${batch.map(m => m.monthKey).join(', ')})`);
+
+      const batchResults = await Promise.all(batch.map(m => processMonth(m)));
+      results.push(...batchResults);
+
+      // Rate limiting entre batches
+      if (i + BATCH_SIZE < monthsToProcess.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
     }
 
-    return series;
+    // Ordenar por fecha (más antiguo primero)
+    results.sort((a, b) => a.index - b.index);
+    results.reverse(); // Más antiguo primero
+
+    // Remover el index del resultado final
+    return results.map(({ index, ...rest }) => rest);
   }
 
   // Obtener costos de envío (incluye bonificaciones FLEX)

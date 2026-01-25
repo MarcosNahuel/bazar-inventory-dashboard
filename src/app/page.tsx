@@ -694,7 +694,7 @@ export default function Dashboard() {
     setSalesHistoryLoading(true);
     try {
       console.log('🔄 Cargando histórico de ventas...');
-      const res = await fetch('/api/sales-history?months=12'); // Reducido a 12 meses para mejor performance
+      const res = await fetch('/api/sales-history?months=6'); // Reducido a 6 meses para carga rápida
       if (res.ok) {
         const data = await res.json();
         console.log('✅ Histórico de ventas cargado:', data.from_cache ? '(desde caché)' : '(datos frescos)');
