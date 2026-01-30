@@ -191,3 +191,257 @@ export function ProfitabilityChart({ data }: ProfitabilityChartProps) {
     </div>
   );
 }
+
+// Gráfico de Tendencia Diaria para Monitor
+interface DailyTrendData {
+  date: string;
+  ventas_count: number;
+  facturacion: number;
+  comisiones: number;
+  costos_envio: number;
+  costo_productos: number;
+  utilidad: number;
+}
+
+interface DailyTrendChartProps {
+  data: DailyTrendData[];
+}
+
+export function DailyTrendChart({ data }: DailyTrendChartProps) {
+  // Preparar datos para el gráfico (ordenar por fecha)
+  const chartData = [...data].reverse().map(d => ({
+    fecha: d.date.substring(5), // Solo MM-DD
+    facturacion: d.facturacion,
+    costos: d.comisiones + d.costos_envio + d.costo_productos,
+    utilidad: d.utilidad,
+  }));
+
+  return (
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis
+            dataKey="fecha"
+            tick={{ fontSize: 10 }}
+            angle={-45}
+            textAnchor="end"
+            height={50}
+          />
+          <YAxis
+            tick={{ fontSize: 10 }}
+            tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
+          />
+          <Tooltip
+            formatter={(value, name) => [
+              `$${Number(value || 0).toLocaleString()}`,
+              name === 'facturacion' ? 'Facturación' :
+              name === 'costos' ? 'Costos Totales' : 'Utilidad'
+            ]}
+            labelFormatter={(label) => `Fecha: ${label}`}
+          />
+          <Legend
+            formatter={(value) =>
+              value === 'facturacion' ? 'Facturación' :
+              value === 'costos' ? 'Costos Totales' : 'Utilidad'
+            }
+          />
+          <Line
+            type="monotone"
+            dataKey="facturacion"
+            stroke="#3B82F6"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="costos"
+            stroke="#EF4444"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="utilidad"
+            stroke="#10B981"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// Gráfico de Barras de Facturación Acumulada
+export function DailyBillingChart({ data }: DailyTrendChartProps) {
+  // Preparar datos con acumulado
+  let acumulado = 0;
+  const chartData = [...data].reverse().map(d => {
+    acumulado += d.facturacion;
+    return {
+      fecha: d.date.substring(5), // Solo MM-DD
+      facturacion: d.facturacion,
+      acumulado: acumulado,
+    };
+  });
+
+  return (
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis
+            dataKey="fecha"
+            tick={{ fontSize: 10 }}
+            angle={-45}
+            textAnchor="end"
+            height={50}
+          />
+          <YAxis
+            yAxisId="left"
+            orientation="left"
+            tick={{ fontSize: 10 }}
+            tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
+          />
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tick={{ fontSize: 10 }}
+            tickFormatter={(value) => `$${(value / 1000000).toFixed(1)}M`}
+          />
+          <Tooltip
+            formatter={(value, name) => [
+              `$${Number(value || 0).toLocaleString()}`,
+              name === 'facturacion' ? 'Facturación Diaria' : 'Acumulado'
+            ]}
+            labelFormatter={(label) => `Fecha: ${label}`}
+          />
+          <Legend
+            formatter={(value) =>
+              value === 'facturacion' ? 'Facturación Diaria' : 'Acumulado'
+            }
+          />
+          <Bar yAxisId="left" dataKey="facturacion" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+          <Line yAxisId="right" type="monotone" dataKey="acumulado" stroke="#10B981" strokeWidth={2} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// Gráfico de Serie Histórica Mensual
+interface MonthlySeriesData {
+  month: string;
+  month_num: number;
+  year: number;
+  revenue: number;
+  orders_count: number;
+  units_sold: number;
+  avg_ticket: number;
+}
+
+interface MonthlySeriesChartProps {
+  data: MonthlySeriesData[];
+}
+
+export function MonthlyRevenueChart({ data }: MonthlySeriesChartProps) {
+  // Preparar datos (ordenados cronológicamente)
+  const chartData = [...data].reverse().map(d => ({
+    mes: d.month.substring(0, 3) + ' ' + d.year.toString().slice(-2), // "Ene 26"
+    facturacion: d.revenue,
+    ordenes: d.orders_count,
+    unidades: d.units_sold,
+  }));
+
+  return (
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis
+            dataKey="mes"
+            tick={{ fontSize: 10 }}
+          />
+          <YAxis
+            yAxisId="left"
+            orientation="left"
+            tick={{ fontSize: 10 }}
+            tickFormatter={(value) => `$${(value / 1000000).toFixed(1)}M`}
+          />
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tick={{ fontSize: 10 }}
+            tickFormatter={(value) => `${value}`}
+          />
+          <Tooltip
+            formatter={(value, name) => [
+              name === 'facturacion' ? `$${Number(value || 0).toLocaleString()}` : Number(value || 0).toLocaleString(),
+              name === 'facturacion' ? 'Facturación' :
+              name === 'ordenes' ? 'Órdenes' : 'Unidades'
+            ]}
+          />
+          <Legend
+            formatter={(value) =>
+              value === 'facturacion' ? 'Facturación' :
+              value === 'ordenes' ? 'Órdenes' : 'Unidades'
+            }
+          />
+          <Bar yAxisId="left" dataKey="facturacion" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+          <Line yAxisId="right" type="monotone" dataKey="ordenes" stroke="#10B981" strokeWidth={2} dot={{ r: 3 }} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// Gráfico de Comparación Año a Año
+export function YearOverYearChart({ data }: MonthlySeriesChartProps) {
+  // Agrupar por mes y año
+  const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const years = [...new Set(data.map(d => d.year))].sort();
+
+  // Crear datos comparativos por mes
+  const chartData = monthNames.map((mes, idx) => {
+    const monthNum = idx + 1;
+    const result: Record<string, string | number> = { mes };
+    years.forEach(year => {
+      const monthData = data.find(d => d.month_num === monthNum && d.year === year);
+      result[`rev_${year}`] = monthData?.revenue || 0;
+    });
+    return result;
+  });
+
+  const colors = ['#CBD5E1', '#94A3B8', '#3B82F6', '#10B981'];
+
+  return (
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="mes" tick={{ fontSize: 10 }} />
+          <YAxis
+            tick={{ fontSize: 10 }}
+            tickFormatter={(value) => `$${(value / 1000000).toFixed(1)}M`}
+          />
+          <Tooltip
+            formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, '']}
+          />
+          <Legend />
+          {years.map((year, idx) => (
+            <Line
+              key={year}
+              type="monotone"
+              dataKey={`rev_${year}`}
+              name={year.toString()}
+              stroke={colors[idx % colors.length]}
+              strokeWidth={idx === years.length - 1 ? 3 : 1.5}
+              dot={{ r: idx === years.length - 1 ? 4 : 2 }}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

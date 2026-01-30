@@ -13,7 +13,11 @@ import {
   ChannelDistributionChart,
   StockDistributionChart,
   TopProductsChart,
-  ProfitabilityChart
+  ProfitabilityChart,
+  DailyTrendChart,
+  DailyBillingChart,
+  MonthlyRevenueChart,
+  YearOverYearChart
 } from '@/components/charts/SalesChart';
 import { CostUploader } from '@/components/CostUploader';
 import Image from 'next/image';
@@ -44,9 +48,9 @@ function ProductTooltip({
                       z-[9999] w-72 bg-white rounded-xl shadow-2xl border border-gray-300 p-4
                       transition-all duration-200 pointer-events-none"
            style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
-        {thumbnail && (
-          <div className="mb-3 flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
+        <div className="mb-3 flex justify-center">
+          {thumbnail ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={thumbnail}
               alt={fullTitle}
@@ -54,8 +58,18 @@ function ProductTooltip({
               height={150}
               className="rounded-lg object-contain bg-gray-100 border"
             />
-          </div>
-        )}
+          ) : (
+            // Placeholder cuando no hay imagen
+            <div className="w-[150px] h-[150px] rounded-lg bg-gray-100 border flex items-center justify-center">
+              <div className="text-center text-gray-400">
+                <svg className="w-12 h-12 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span className="text-xs">Sin imagen</span>
+              </div>
+            </div>
+          )}
+        </div>
         <p className="text-sm text-gray-900 font-semibold leading-tight text-center">
           {fullTitle}
         </p>
@@ -195,7 +209,9 @@ interface InventoryData {
     products_to_restock: {
       flex: Array<{ codigo_ml: string; titulo: string; titulo_completo?: string; thumbnail?: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
       full: Array<{ codigo_ml: string; titulo: string; titulo_completo?: string; thumbnail?: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string }>;
+      out_of_stock?: Array<{ codigo_ml: string; titulo: string; titulo_completo?: string; thumbnail?: string; stock: number; ventas_30d: number; sugerido_reponer: number; proveedor: string; logistic_type: string }>;
     };
+    out_of_stock_count?: number;
   };
   suppliers: Array<{
     proveedor: string;
@@ -214,6 +230,7 @@ interface InventoryData {
       titulo: string;
       titulo_completo?: string;
       thumbnail?: string;
+      proveedor?: string;
       precio: number;
       costo: number;
       comision?: number;
@@ -228,6 +245,7 @@ interface InventoryData {
       titulo: string;
       titulo_completo?: string;
       thumbnail?: string;
+      proveedor?: string;
       precio?: number;
       costo?: number;
       comision?: number;
@@ -235,6 +253,22 @@ interface InventoryData {
       utilidad?: number;
       utilidad_sin_envio?: number;
       rentabilidad: number;
+    }>;
+    all_products?: Array<{
+      codigo_ml: string;
+      titulo: string;
+      titulo_completo?: string;
+      thumbnail?: string;
+      proveedor?: string;
+      precio: number;
+      costo: number;
+      comision?: number;
+      envio?: number;
+      utilidad: number;
+      utilidad_sin_envio?: number;
+      rentabilidad: number;
+      utilidad_30d?: number;
+      ventas_30d?: number;
     }>;
   };
 }
@@ -583,6 +617,15 @@ export default function Dashboard() {
 
   // Filtros de alertas
   const [alertsGroupByProveedor, setAlertsGroupByProveedor] = useState(false);
+
+  // Filtros de reposición
+  const [restockGroupByProveedor, setRestockGroupByProveedor] = useState(false);
+
+  // Filtros de Costos/Rentabilidad
+  const [costsProveedorFilter, setCostsProveedorFilter] = useState<string>('all');
+  const [costsMlcFilter, setCostsMlcFilter] = useState<string>('');
+  const [costsNameFilter, setCostsNameFilter] = useState<string>('');
+  const [costsShowAll, setCostsShowAll] = useState(false);
 
   // Tab de valorización (precio, costo, utilidad)
   const [valorizacionTab, setValorizacionTab] = useState<'precio' | 'costo' | 'utilidad'>('costo');
@@ -1798,13 +1841,40 @@ export default function Dashboard() {
 
             {/* Productos a reponer - Ordenados por producto (FULL y FLEX juntos) */}
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-orange-500" />
-                Productos a Reponer (Ordenados por Producto)
-              </h3>
-              <p className="text-sm text-gray-500 mb-4">
-                Los productos con convivencia FULL/FLEX se muestran en filas consecutivas
-              </p>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-orange-500" />
+                    Productos a Reponer {restockGroupByProveedor ? '(Agrupados por Proveedor)' : '(Ordenados por Producto)'}
+                    {(inventory.logistics_distribution.out_of_stock_count || 0) > 0 && (
+                      <span className="px-2 py-1 text-xs font-bold rounded bg-red-500 text-white animate-pulse">
+                        {inventory.logistics_distribution.out_of_stock_count} SIN STOCK
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {restockGroupByProveedor
+                      ? 'Vista ideal para generar órdenes de compra por proveedor'
+                      : 'Los productos con convivencia FULL/FLEX se muestran en filas consecutivas'}
+                    {(inventory.logistics_distribution.out_of_stock_count || 0) > 0 &&
+                      ' • Los productos sin stock se muestran con fondo rojo'}
+                  </p>
+                </div>
+                {/* Toggle Agrupar por Proveedor */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">Agrupar por Proveedor:</label>
+                  <button
+                    onClick={() => setRestockGroupByProveedor(!restockGroupByProveedor)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      restockGroupByProveedor
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                    }`}
+                  >
+                    {restockGroupByProveedor ? 'Activado' : 'Desactivado'}
+                  </button>
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
@@ -1819,66 +1889,177 @@ export default function Dashboard() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {(() => {
-                      // Combinar productos FULL y FLEX, agrupados por producto
+                      // Combinar productos FULL, FLEX y SIN STOCK
                       const fullProducts = inventory.logistics_distribution.products_to_restock.full.map(p => ({ ...p, canal: 'FULL' }));
                       const flexProducts = inventory.logistics_distribution.products_to_restock.flex.map(p => ({ ...p, canal: 'FLEX' }));
+                      const outOfStockProducts = (inventory.logistics_distribution.products_to_restock.out_of_stock || []).map(p => ({
+                        ...p,
+                        canal: p.logistic_type === 'full' ? 'FULL' : p.logistic_type === 'flex' ? 'FLEX' : 'N/A'
+                      }));
+                      // Productos sin stock van primero (más urgentes)
+                      const allProducts = [...outOfStockProducts, ...fullProducts, ...flexProducts];
 
-                      // Crear un mapa para agrupar por código ML
-                      const productMap = new Map<string, Array<typeof fullProducts[0]>>();
+                      if (restockGroupByProveedor) {
+                        // === VISTA AGRUPADA POR PROVEEDOR ===
+                        const proveedorMap = new Map<string, Array<typeof fullProducts[0]>>();
 
-                      [...fullProducts, ...flexProducts].forEach(p => {
-                        const existing = productMap.get(p.codigo_ml) || [];
-                        existing.push(p);
-                        productMap.set(p.codigo_ml, existing);
-                      });
-
-                      // Ordenar por cantidad a reponer (mayor primero)
-                      const sortedGroups = Array.from(productMap.entries())
-                        .sort((a, b) => {
-                          const maxA = Math.max(...a[1].map(x => x.sugerido_reponer));
-                          const maxB = Math.max(...b[1].map(x => x.sugerido_reponer));
-                          return maxB - maxA;
+                        allProducts.forEach(p => {
+                          const key = p.proveedor || 'Sin asignar';
+                          const existing = proveedorMap.get(key) || [];
+                          existing.push(p);
+                          proveedorMap.set(key, existing);
                         });
 
-                      // Renderizar filas consecutivas para cada producto
-                      return sortedGroups.flatMap(([, products], groupIdx) =>
-                        products.map((p, idx) => (
-                          <tr
-                            key={`${p.codigo_ml}-${p.canal}`}
-                            className={`hover:bg-gray-50 ${idx === 0 && groupIdx > 0 ? 'border-t-2 border-gray-300' : ''}`}
-                          >
-                            <td className="px-3 py-3">
-                              <span className={`px-2 py-1 text-xs font-medium rounded ${
-                                p.canal === 'FULL'
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : 'bg-purple-100 text-purple-700'
-                              }`}>
-                                {p.canal}
-                              </span>
-                            </td>
-                            <td className="px-3 py-3">
-                              <ProductTooltip
-                                titulo={p.titulo}
-                                tituloCompleto={p.titulo_completo}
-                                thumbnail={p.thumbnail}
-                                codigoMl={p.codigo_ml}
-                              />
-                            </td>
-                            <td className="px-3 py-3 text-sm text-gray-600">{p.proveedor || 'Sin asignar'}</td>
-                            <td className="px-3 py-3 text-sm text-right text-gray-600">{p.stock}</td>
-                            <td className="px-3 py-3 text-sm text-right text-blue-600">{p.ventas_30d}</td>
-                            <td className="px-3 py-3 text-right bg-orange-50">
-                              <span className="font-bold text-orange-600">{p.sugerido_reponer}</span>
-                            </td>
-                          </tr>
-                        ))
-                      );
+                        // Ordenar proveedores por total a reponer (mayor primero)
+                        const sortedProveedores = Array.from(proveedorMap.entries())
+                          .sort((a, b) => {
+                            const totalA = a[1].reduce((sum, x) => sum + x.sugerido_reponer, 0);
+                            const totalB = b[1].reduce((sum, x) => sum + x.sugerido_reponer, 0);
+                            return totalB - totalA;
+                          });
+
+                        return sortedProveedores.flatMap(([proveedor, products]) => {
+                          const totalReponer = products.reduce((sum, x) => sum + x.sugerido_reponer, 0);
+                          const totalStock = products.reduce((sum, x) => sum + x.stock, 0);
+
+                          // Ordenar productos dentro del proveedor por cantidad a reponer
+                          const sortedProducts = products.sort((a, b) => b.sugerido_reponer - a.sugerido_reponer);
+
+                          return [
+                            // Header del proveedor
+                            <tr key={`header-${proveedor}`} className="bg-orange-50 border-t-2 border-orange-300">
+                              <td colSpan={6} className="px-3 py-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <span className="font-bold text-orange-700 text-lg">{proveedor}</span>
+                                    <span className="text-sm text-gray-500">({products.length} productos)</span>
+                                  </div>
+                                  <div className="flex items-center gap-4 text-sm">
+                                    <span className="text-gray-600">Stock actual: <b>{totalStock}</b></span>
+                                    <span className="bg-orange-500 text-white px-3 py-1 rounded-full font-bold">
+                                      Total a reponer: {totalReponer} unidades
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>,
+                            // Productos del proveedor
+                            ...sortedProducts.map((p) => {
+                              const isOutOfStock = p.stock === 0;
+                              return (
+                                <tr key={`${p.codigo_ml}-${p.canal}`} className={`hover:bg-gray-50 ${isOutOfStock ? 'bg-red-50' : ''}`}>
+                                  <td className="px-3 py-3">
+                                    <div className="flex items-center gap-1">
+                                      <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                        p.canal === 'FULL'
+                                          ? 'bg-blue-100 text-blue-700'
+                                          : p.canal === 'FLEX'
+                                          ? 'bg-purple-100 text-purple-700'
+                                          : 'bg-gray-100 text-gray-700'
+                                      }`}>
+                                        {p.canal}
+                                      </span>
+                                      {isOutOfStock && (
+                                        <span className="px-2 py-1 text-xs font-bold rounded bg-red-500 text-white">
+                                          SIN STOCK
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <ProductTooltip
+                                      titulo={p.titulo}
+                                      tituloCompleto={p.titulo_completo}
+                                      thumbnail={p.thumbnail}
+                                      codigoMl={p.codigo_ml}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-3 text-sm text-gray-400">{p.proveedor || 'Sin asignar'}</td>
+                                  <td className={`px-3 py-3 text-sm text-right ${isOutOfStock ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
+                                    {p.stock}
+                                  </td>
+                                  <td className="px-3 py-3 text-sm text-right text-blue-600">{p.ventas_30d}</td>
+                                  <td className="px-3 py-3 text-right bg-orange-50">
+                                    <span className="font-bold text-orange-600">{p.sugerido_reponer}</span>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ];
+                        });
+                      } else {
+                        // === VISTA POR PRODUCTO (original) ===
+                        const productMap = new Map<string, Array<typeof fullProducts[0]>>();
+
+                        allProducts.forEach(p => {
+                          const existing = productMap.get(p.codigo_ml) || [];
+                          existing.push(p);
+                          productMap.set(p.codigo_ml, existing);
+                        });
+
+                        // Ordenar por cantidad a reponer (mayor primero)
+                        const sortedGroups = Array.from(productMap.entries())
+                          .sort((a, b) => {
+                            const maxA = Math.max(...a[1].map(x => x.sugerido_reponer));
+                            const maxB = Math.max(...b[1].map(x => x.sugerido_reponer));
+                            return maxB - maxA;
+                          });
+
+                        // Renderizar filas consecutivas para cada producto
+                        return sortedGroups.flatMap(([, products], groupIdx) =>
+                          products.map((p, idx) => {
+                            const isOutOfStock = p.stock === 0;
+                            return (
+                              <tr
+                                key={`${p.codigo_ml}-${p.canal}`}
+                                className={`hover:bg-gray-50 ${idx === 0 && groupIdx > 0 ? 'border-t-2 border-gray-300' : ''} ${isOutOfStock ? 'bg-red-50' : ''}`}
+                              >
+                                <td className="px-3 py-3">
+                                  <div className="flex items-center gap-1">
+                                    <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                      p.canal === 'FULL'
+                                        ? 'bg-blue-100 text-blue-700'
+                                        : p.canal === 'FLEX'
+                                        ? 'bg-purple-100 text-purple-700'
+                                        : 'bg-gray-100 text-gray-700'
+                                    }`}>
+                                      {p.canal}
+                                    </span>
+                                    {isOutOfStock && (
+                                      <span className="px-2 py-1 text-xs font-bold rounded bg-red-500 text-white">
+                                        SIN STOCK
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <ProductTooltip
+                                    titulo={p.titulo}
+                                    tituloCompleto={p.titulo_completo}
+                                    thumbnail={p.thumbnail}
+                                    codigoMl={p.codigo_ml}
+                                  />
+                                </td>
+                                <td className="px-3 py-3 text-sm text-gray-600">{p.proveedor || 'Sin asignar'}</td>
+                                <td className={`px-3 py-3 text-sm text-right ${isOutOfStock ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
+                                  {p.stock}
+                                </td>
+                                <td className="px-3 py-3 text-sm text-right text-blue-600">{p.ventas_30d}</td>
+                                <td className="px-3 py-3 text-right bg-orange-50">
+                                  <span className="font-bold text-orange-600">{p.sugerido_reponer}</span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        );
+                      }
                     })()}
                   </tbody>
                 </table>
               </div>
               {inventory.logistics_distribution.products_to_restock.full.length === 0 &&
-               inventory.logistics_distribution.products_to_restock.flex.length === 0 && (
+               inventory.logistics_distribution.products_to_restock.flex.length === 0 &&
+               (inventory.logistics_distribution.products_to_restock.out_of_stock || []).length === 0 && (
                 <div className="text-center py-8 text-gray-500">
                   <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
                   <p>No hay productos que necesiten reposición urgente</p>
@@ -2005,19 +2186,61 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Top Productos Rentables */}
+                {/* Top Productos Rentables - Con filtros y todos los productos */}
                 <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b bg-green-50">
-                    <h3 className="text-lg font-semibold text-green-800 flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5" />
-                      Top 10 Productos Más Rentables (Utilidad 30D)
-                    </h3>
+                    <div className="flex items-center justify-between flex-wrap gap-4">
+                      <h3 className="text-lg font-semibold text-green-800 flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5" />
+                        {costsShowAll ? 'Todos los Productos' : 'Top 10 Productos Más Rentables'} (Utilidad 30D)
+                      </h3>
+                      <button
+                        onClick={() => setCostsShowAll(!costsShowAll)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          costsShowAll
+                            ? 'bg-green-600 text-white'
+                            : 'bg-white text-green-700 border border-green-300 hover:bg-green-50'
+                        }`}
+                      >
+                        {costsShowAll ? 'Ver Top 10' : 'Ver Todos'}
+                      </button>
+                    </div>
+                    {/* Filtros - solo visibles cuando se muestran todos */}
+                    {costsShowAll && (
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <input
+                          type="text"
+                          placeholder="Buscar por MLC..."
+                          value={costsMlcFilter}
+                          onChange={(e) => setCostsMlcFilter(e.target.value)}
+                          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-40"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre..."
+                          value={costsNameFilter}
+                          onChange={(e) => setCostsNameFilter(e.target.value)}
+                          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-48"
+                        />
+                        <select
+                          value={costsProveedorFilter}
+                          onChange={(e) => setCostsProveedorFilter(e.target.value)}
+                          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                        >
+                          <option value="all">Todos los proveedores</option>
+                          {inventory.suppliers?.map(s => (
+                            <option key={s.proveedor} value={s.proveedor}>{s.proveedor}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto max-h-[600px]">
                     <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
+                      <thead className="bg-gray-50 sticky top-0">
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Costo</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Comisión</th>
@@ -2030,54 +2253,92 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {inventory.profitability.top_profitable.map((p, i) => (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-4 py-3">
-                              <ProductTooltip
-                                titulo={p.titulo}
-                                tituloCompleto={p.titulo_completo}
-                                thumbnail={p.thumbnail}
-                                codigoMl={p.codigo_ml}
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-900">
-                              ${p.precio.toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-600">
-                              ${p.costo.toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-500">
-                              ${(p.comision || 0).toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm text-purple-600">
-                              ${(p.envio || 0).toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <span className={`px-2 py-1 rounded text-sm font-medium ${(p.utilidad + (p.envio || 0)) > 0 ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
-                                ${(p.utilidad + (p.envio || 0)).toLocaleString()}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <span className={`px-2 py-1 rounded text-sm font-medium ${p.utilidad > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                ${p.utilidad.toLocaleString()}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm text-gray-600">
-                              {p.ventas_30d || 0}
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm font-bold text-green-600">
-                              ${((p.utilidad_30d || 0) / 1000).toFixed(0)}K
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <span className={`px-2 py-1 rounded text-sm font-medium ${p.rentabilidad > 30 ? 'bg-green-100 text-green-800' : p.rentabilidad > 15 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                                {p.rentabilidad}%
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                        {(() => {
+                          // Usar all_products si existe y costsShowAll, sino top_profitable
+                          const sourceProducts = costsShowAll && inventory.profitability.all_products
+                            ? inventory.profitability.all_products
+                            : inventory.profitability.top_profitable;
+
+                          // Aplicar filtros
+                          let filteredProducts = sourceProducts;
+                          if (costsShowAll) {
+                            filteredProducts = sourceProducts.filter(p => {
+                              const matchMlc = !costsMlcFilter || p.codigo_ml.toLowerCase().includes(costsMlcFilter.toLowerCase());
+                              const matchName = !costsNameFilter || p.titulo.toLowerCase().includes(costsNameFilter.toLowerCase());
+                              const matchProveedor = costsProveedorFilter === 'all' || p.proveedor === costsProveedorFilter;
+                              return matchMlc && matchName && matchProveedor;
+                            });
+                          }
+
+                          return filteredProducts.map((p, i) => (
+                            <tr key={i} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">
+                                <ProductTooltip
+                                  titulo={p.titulo}
+                                  tituloCompleto={p.titulo_completo}
+                                  thumbnail={p.thumbnail}
+                                  codigoMl={p.codigo_ml}
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {p.proveedor || 'Sin asignar'}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-900">
+                                ${p.precio.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-600">
+                                ${p.costo.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-500">
+                                ${(p.comision || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-purple-600">
+                                ${(p.envio || 0).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={`px-2 py-1 rounded text-sm font-medium ${(p.utilidad + (p.envio || 0)) > 0 ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
+                                  ${(p.utilidad + (p.envio || 0)).toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={`px-2 py-1 rounded text-sm font-medium ${p.utilidad > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                  ${p.utilidad.toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm text-gray-600">
+                                {p.ventas_30d || 0}
+                              </td>
+                              <td className="px-4 py-3 text-right text-sm font-bold text-green-600">
+                                ${((p.utilidad_30d || 0) / 1000).toFixed(0)}K
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={`px-2 py-1 rounded text-sm font-medium ${p.rentabilidad > 30 ? 'bg-green-100 text-green-800' : p.rentabilidad > 15 ? 'bg-yellow-100 text-yellow-800' : p.rentabilidad < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
+                                  {p.rentabilidad}%
+                                </span>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
+                  {costsShowAll && (
+                    <div className="px-6 py-3 bg-gray-50 border-t text-sm text-gray-500">
+                      Mostrando {(() => {
+                        const sourceProducts = inventory.profitability.all_products || inventory.profitability.top_profitable;
+                        let filtered = sourceProducts;
+                        if (costsMlcFilter || costsNameFilter || costsProveedorFilter !== 'all') {
+                          filtered = sourceProducts.filter(p => {
+                            const matchMlc = !costsMlcFilter || p.codigo_ml.toLowerCase().includes(costsMlcFilter.toLowerCase());
+                            const matchName = !costsNameFilter || p.titulo.toLowerCase().includes(costsNameFilter.toLowerCase());
+                            const matchProveedor = costsProveedorFilter === 'all' || p.proveedor === costsProveedorFilter;
+                            return matchMlc && matchName && matchProveedor;
+                          });
+                        }
+                        return filtered.length;
+                      })()} de {inventory.profitability.all_products?.length || inventory.profitability.top_profitable.length} productos
+                    </div>
+                  )}
                 </div>
 
                 {/* Negative Margin Alert */}
@@ -2865,12 +3126,33 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Resumen Diario */}
+                {/* Gráficos de Tendencia Diaria */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Gráfico de Facturación vs Costos vs Utilidad */}
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                      <LineChart className="w-5 h-5 text-blue-600" />
+                      Tendencia Diaria (Facturación, Costos, Utilidad)
+                    </h3>
+                    <DailyTrendChart data={monthlyMonitor.daily} />
+                  </div>
+
+                  {/* Gráfico de Facturación Acumulada */}
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                      <BarChart3 className="w-5 h-5 text-green-600" />
+                      Facturación Diaria y Acumulada
+                    </h3>
+                    <DailyBillingChart data={monthlyMonitor.daily} />
+                  </div>
+                </div>
+
+                {/* Tabla Resumen Diario */}
                 <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b">
                     <h3 className="text-lg font-semibold flex items-center gap-2">
                       <Calendar className="w-5 h-5 text-emerald-600" />
-                      Tendencia Diaria
+                      Detalle Tendencia Diaria
                     </h3>
                   </div>
                   <div className="overflow-x-auto max-h-[400px]">
@@ -3016,6 +3298,27 @@ export default function Dashboard() {
                         <p className="text-xs text-gray-400">vs 6 meses anteriores</p>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Gráficos de Serie Mensual */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Gráfico de Facturación y Órdenes Mensuales */}
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                      <BarChart3 className="w-5 h-5 text-blue-600" />
+                      Facturación y Órdenes Mensuales
+                    </h3>
+                    <MonthlyRevenueChart data={salesHistory.series} />
+                  </div>
+
+                  {/* Gráfico de Comparación Año a Año */}
+                  <div className="bg-white rounded-xl shadow-sm p-6">
+                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                      <LineChart className="w-5 h-5 text-green-600" />
+                      Comparación Año vs Año
+                    </h3>
+                    <YearOverYearChart data={salesHistory.series} />
                   </div>
                 </div>
 
