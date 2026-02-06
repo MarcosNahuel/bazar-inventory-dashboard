@@ -115,6 +115,21 @@ export async function GET(request: NextRequest) {
 
     // === SYNC ORDENES (últimos 7 días) ===
     console.log('[CRON] Syncing orders...');
+
+    // Prefetch products map once to avoid per-item queries.
+    const { data: productsRows, error: productsErr } = await supabase
+      .from('products')
+      .select('id,ml_id');
+    if (productsErr) {
+      console.warn('[CRON] Could not preload products map:', productsErr);
+    }
+    const typedProducts = (productsRows || []) as Array<{ id: string; ml_id: string | null }>;
+    const productsMap = new Map<string, string>(
+      typedProducts
+        .filter(p => !!p.ml_id)
+        .map(p => [p.ml_id as string, p.id])
+    );
+
     const orders = await ml.getAllOrders(7);
 
     for (const order of orders) {
@@ -133,43 +148,40 @@ export async function GET(request: NextRequest) {
         synced_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase
+      const { data: upsertedOrders, error } = await supabase
         .from('orders')
-        .upsert(orderData, { onConflict: 'ml_order_id' });
+        .upsert(orderData, { onConflict: 'ml_order_id' })
+        .select('id,ml_order_id');
 
       if (error) {
         itemsFailed++;
       } else {
         itemsUpdated++;
 
-        // Insertar items de la orden
+        // Insertar items de la orden (idempotente por order_id + ml_item_id)
         if (order.order_items) {
-          const { data: orderRow } = await supabase
-            .from('orders')
-            .select('id')
-            .eq('ml_order_id', order.id)
-            .single();
+          const orderRowId =
+            Array.isArray(upsertedOrders) && upsertedOrders[0] && typeof upsertedOrders[0] === 'object' && 'id' in upsertedOrders[0]
+              ? (upsertedOrders[0] as { id: string }).id
+              : null;
 
-          if (orderRow) {
-            for (const orderItem of order.order_items) {
-              const { data: productRow } = await supabase
-                .from('products')
-                .select('id')
-                .eq('ml_id', orderItem.item.id)
-                .single();
+          if (orderRowId) {
+            const items = order.order_items.map(orderItem => ({
+              order_id: orderRowId,
+              ml_item_id: orderItem.item.id,
+              product_id: productsMap.get(orderItem.item.id) || null,
+              title: orderItem.item.title,
+              sku: orderItem.item.seller_sku,
+              quantity: orderItem.quantity,
+              unit_price: orderItem.unit_price,
+            }));
 
-              await supabase.from('order_items').upsert(
-                {
-                  order_id: orderRow.id,
-                  ml_item_id: orderItem.item.id,
-                  product_id: productRow?.id || null,
-                  title: orderItem.item.title,
-                  sku: orderItem.item.seller_sku,
-                  quantity: orderItem.quantity,
-                  unit_price: orderItem.unit_price,
-                },
-                { onConflict: 'order_id,ml_item_id' }
-              );
+            const { error: itemsErr } = await supabase
+              .from('order_items')
+              .upsert(items, { onConflict: 'order_id,ml_item_id' });
+
+            if (itemsErr) {
+              itemsFailed++;
             }
           }
         }

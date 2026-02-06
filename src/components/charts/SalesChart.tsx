@@ -276,13 +276,16 @@ export function DailyTrendChart({ data }: DailyTrendChartProps) {
 // Gráfico de Barras de Facturación Acumulada
 export function DailyBillingChart({ data }: DailyTrendChartProps) {
   // Preparar datos con acumulado
-  let acumulado = 0;
-  const chartData = [...data].reverse().map(d => {
-    acumulado += d.facturacion;
+  // Preparar datos con acumulado
+  const reversedData = [...data].reverse();
+  let currentAcumulado = 0;
+  
+  const chartData = reversedData.map(d => {
+    currentAcumulado += d.facturacion;
     return {
       fecha: d.date.substring(5), // Solo MM-DD
       facturacion: d.facturacion,
-      acumulado: acumulado,
+      acumulado: currentAcumulado,
     };
   });
 

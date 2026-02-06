@@ -16,6 +16,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const syncType = body.type || 'full'; // 'products', 'orders', 'stock', 'full'
+    const ordersDays: number | null = typeof body.days === 'number' ? body.days : null;
+    const ordersMax: number = typeof body.max_orders === 'number' ? body.max_orders : 10000;
+    const dateFromStr: string | null = typeof body.date_from === 'string' ? body.date_from : null;
+    const dateToStr: string | null = typeof body.date_to === 'string' ? body.date_to : null;
 
     // Verificar credenciales
     if (!supabaseUrl || !supabaseServiceKey) {
@@ -135,7 +139,45 @@ export async function POST(request: NextRequest) {
     if (syncType === 'full' || syncType === 'orders') {
       console.log('Syncing orders...');
 
-      const orders = await ml.getAllOrders(30);
+      // Prefetch products map once to avoid per-item queries.
+      const { data: productsRows, error: productsErr } = await supabase
+        .from('products')
+        .select('id,ml_id');
+      if (productsErr) {
+        console.warn('Could not preload products map:', productsErr);
+      }
+      const productsMap = new Map<string, string>(
+        (productsRows || [])
+          .filter((p: { id: string; ml_id: string }) => !!p.ml_id)
+          .map((p: { id: string; ml_id: string }) => [p.ml_id, p.id])
+      );
+
+      let orders: Array<{
+        id: number;
+        status: string;
+        date_created: string;
+        date_closed: string;
+        total_amount: number;
+        currency_id: string;
+        buyer?: { id?: number; nickname?: string };
+        order_items?: Array<{
+          item: { id: string; title: string; seller_sku: string | null };
+          quantity: number;
+          unit_price: number;
+        }>;
+        shipping?: { id?: number; status?: string; logistic_type?: string };
+      }> = [];
+
+      if (dateFromStr && dateToStr) {
+        const df = new Date(dateFromStr);
+        const dt = new Date(dateToStr);
+        console.log(`Syncing orders by date range: ${df.toISOString()} -> ${dt.toISOString()}`);
+        orders = await ml.getAllOrdersByDateRange(df, dt, ordersMax);
+      } else {
+        const days = ordersDays ?? 30;
+        console.log(`Syncing orders for last ${days} days (max ${ordersMax})...`);
+        orders = await ml.getAllOrders(days, ordersMax);
+      }
 
       for (const order of orders) {
         itemsProcessed++;
@@ -149,14 +191,16 @@ export async function POST(request: NextRequest) {
           currency_id: order.currency_id,
           shipping_id: order.shipping?.id,
           shipping_status: order.shipping?.status,
+          logistic_type: order.shipping?.logistic_type || null,
           date_created: order.date_created,
           date_closed: order.date_closed,
           synced_at: new Date().toISOString(),
         };
 
-        const { error: orderError } = await supabase
+        const { data: upsertedOrders, error: orderError } = await supabase
           .from('orders')
-          .upsert(orderData, { onConflict: 'ml_order_id' });
+          .upsert(orderData, { onConflict: 'ml_order_id' })
+          .select('id,ml_order_id');
 
         if (orderError) {
           console.error(`Error upserting order ${order.id}:`, orderError);
@@ -166,34 +210,29 @@ export async function POST(request: NextRequest) {
 
           // Insertar items de la orden
           if (order.order_items) {
-            for (const orderItem of order.order_items) {
-              // Obtener el order_id interno
-              const { data: orderRow } = await supabase
-                .from('orders')
-                .select('id')
-                .eq('ml_order_id', order.id)
-                .single();
+            const orderRowId =
+              Array.isArray(upsertedOrders) && upsertedOrders[0] && typeof upsertedOrders[0] === 'object' && 'id' in upsertedOrders[0]
+                ? (upsertedOrders[0] as { id: string }).id
+                : null;
 
-              if (orderRow) {
-                // Buscar producto relacionado
-                const { data: productRow } = await supabase
-                  .from('products')
-                  .select('id')
-                  .eq('ml_id', orderItem.item.id)
-                  .single();
+            if (orderRowId) {
+              const items = order.order_items.map(orderItem => ({
+                order_id: orderRowId,
+                ml_item_id: orderItem.item.id,
+                product_id: productsMap.get(orderItem.item.id) || null,
+                title: orderItem.item.title,
+                sku: orderItem.item.seller_sku,
+                quantity: orderItem.quantity,
+                unit_price: orderItem.unit_price,
+              }));
 
-                await supabase.from('order_items').upsert(
-                  {
-                    order_id: orderRow.id,
-                    ml_item_id: orderItem.item.id,
-                    product_id: productRow?.id || null,
-                    title: orderItem.item.title,
-                    sku: orderItem.item.seller_sku,
-                    quantity: orderItem.quantity,
-                    unit_price: orderItem.unit_price,
-                  },
-                  { onConflict: 'order_id,ml_item_id' }
-                );
+              const { error: itemsErr } = await supabase
+                .from('order_items')
+                .upsert(items, { onConflict: 'order_id,ml_item_id' });
+
+              if (itemsErr) {
+                console.error(`Error upserting order_items for order ${order.id}:`, itemsErr);
+                itemsFailed++;
               }
             }
           }
