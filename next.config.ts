@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 
+// Fix: ML tokens refreshed - sync restored
 const nextConfig: NextConfig = {
   // Allowed domains for images
   images: {
