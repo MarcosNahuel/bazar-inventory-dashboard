@@ -1,7 +1,7 @@
 /**
  * Cliente de API Mercado Libre
- * Maneja autenticación, rate limiting y operaciones principales
- * Los tokens se persisten automáticamente en Supabase
+ * Maneja autenticaciÃ³n, rate limiting y operaciones principales
+ * Los tokens se persisten automÃ¡ticamente en Supabase
  */
 
 import { getStoredTokens, saveTokens, isTokenExpiringSoon } from './token-store';
@@ -34,11 +34,11 @@ class MercadoLibreClient {
     this.userId = process.env.ML_USER_ID || '';
   }
 
-  // Inicializar tokens desde Supabase (si están disponibles)
+  // Inicializar tokens desde Supabase (si estÃ¡n disponibles)
   private async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
 
-    // Evitar múltiples inicializaciones concurrentes
+    // Evitar mÃºltiples inicializaciones concurrentes
     if (this.initPromise) {
       await this.initPromise;
       return;
@@ -58,7 +58,7 @@ class MercadoLibreClient {
         this.refreshToken = stored.refresh_token;
         this.expiresAt = new Date(stored.expires_at).getTime();
 
-        // Si el token está por expirar, refrescarlo proactivamente
+        // Si el token estÃ¡ por expirar, refrescarlo proactivamente
         if (isTokenExpiringSoon(stored.expires_at, 30)) {
           console.log('[ML Client] Token expiring soon, refreshing proactively...');
           await this.refreshAccessToken();
@@ -75,7 +75,7 @@ class MercadoLibreClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    // Asegurar que los tokens están inicializados desde Supabase
+    // Asegurar que los tokens estÃ¡n inicializados desde Supabase
     await this.ensureInitialized();
 
     const url = `${ML_API_BASE}${endpoint}`;
@@ -121,7 +121,17 @@ class MercadoLibreClient {
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => 'Unknown error');
-      console.error('[ML Client] Token refresh failed:', response.status, errorBody);
+      console.error('[ML Client] Token refresh failed with in-memory token:', response.status, errorBody);
+
+      // Another instance may have rotated the token â€” reload from Supabase and retry once
+      const stored = await getStoredTokens();
+      if (stored && stored.refresh_token !== this.refreshToken) {
+        console.log('[ML Client] Found newer token in Supabase, retrying refresh...');
+        this.refreshToken = stored.refresh_token;
+        this.accessToken = stored.access_token;
+        return this.refreshAccessToken();
+      }
+
       throw new Error('Failed to refresh ML token');
     }
 
@@ -141,7 +151,7 @@ class MercadoLibreClient {
     return data;
   }
 
-  // Obtener información del usuario
+  // Obtener informaciÃ³n del usuario
   async getUser() {
     return this.request<{
       id: number;
@@ -160,7 +170,7 @@ class MercadoLibreClient {
     }>(`/users/${this.userId}/items/search?limit=${limit}&offset=${offset}${statusParam}`);
   }
 
-  // Obtener detalles de múltiples productos
+  // Obtener detalles de mÃºltiples productos
   async getProductsDetails(ids: string[]) {
     const idsParam = ids.join(',');
     return this.request<Array<{
@@ -182,7 +192,7 @@ class MercadoLibreClient {
         category_id: string;
         date_created: string;
         last_updated: string;
-        // Campos adicionales para detección
+        // Campos adicionales para detecciÃ³n
         tags: string[];
         channels: string[];
         listing_type_id: string;
@@ -200,7 +210,7 @@ class MercadoLibreClient {
     }>>(`/items?ids=${idsParam}`);
   }
 
-  // Obtener stock por ubicación
+  // Obtener stock por ubicaciÃ³n
   async getStock(itemId: string) {
     try {
       return await this.request<{
@@ -215,8 +225,8 @@ class MercadoLibreClient {
     }
   }
 
-  // Obtener información de envío
-  // Según doc ML: logistic.type puede ser: drop_off, fulfillment, cross_docking, self_service, xd_drop_off
+  // Obtener informaciÃ³n de envÃ­o
+  // SegÃºn doc ML: logistic.type puede ser: drop_off, fulfillment, cross_docking, self_service, xd_drop_off
   async getShipment(shipmentId: number) {
     try {
       const response = await this.request<{
@@ -239,7 +249,7 @@ class MercadoLibreClient {
     }
   }
 
-  // Obtener stock separado por ubicación (FULL vs FLEX)
+  // Obtener stock separado por ubicaciÃ³n (FULL vs FLEX)
   // Requiere user_product_id, no item_id
   async getUserProductStock(userProductId: string) {
     try {
@@ -274,7 +284,7 @@ class MercadoLibreClient {
     }
   }
 
-  // Obtener stock por ubicación directamente con item_id
+  // Obtener stock por ubicaciÃ³n directamente con item_id
   async getItemStockByLocation(itemId: string) {
     try {
       const response = await this.request<{
@@ -318,7 +328,7 @@ class MercadoLibreClient {
     }
   }
 
-  // Obtener órdenes
+  // Obtener Ã³rdenes
   async getOrders(daysBack = 30, limit = 50, offset = 0) {
     const dateFrom = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000)
       .toISOString()
@@ -344,7 +354,7 @@ class MercadoLibreClient {
     }>(`/orders/search?seller=${this.userId}&order.date_created.from=${dateFrom}&limit=${limit}&offset=${offset}&sort=date_desc`);
   }
 
-  // Obtener todas las órdenes de los últimos N días
+  // Obtener todas las Ã³rdenes de los Ãºltimos N dÃ­as
   async getAllOrders(daysBack = 30, maxOrders = 10000) {
     const allOrders = [];
     let offset = 0;
@@ -393,7 +403,7 @@ class MercadoLibreClient {
     return allProducts;
   }
 
-  // Calcular ventas por SKU en un período
+  // Calcular ventas por SKU en un perÃ­odo
   async getSalesBySku(daysBack = 30) {
     const orders = await this.getAllOrders(daysBack);
     const salesBySku: Record<string, { quantity: number; amount: number }> = {};
@@ -414,7 +424,7 @@ class MercadoLibreClient {
     return salesBySku;
   }
 
-  // Obtener órdenes por rango de fechas
+  // Obtener Ã³rdenes por rango de fechas
   async getOrdersByDateRange(dateFrom: Date, dateTo: Date, limit = 50, offset = 0) {
     const fromStr = dateFrom.toISOString().split('.')[0] + '.000-00:00';
     const toStr = dateTo.toISOString().split('.')[0] + '.000-00:00';
@@ -439,7 +449,7 @@ class MercadoLibreClient {
     }>(`/orders/search?seller=${this.userId}&order.date_created.from=${fromStr}&order.date_created.to=${toStr}&limit=${limit}&offset=${offset}&sort=date_asc`);
   }
 
-  // Obtener todas las órdenes en un rango de fechas (paginado completo)
+  // Obtener todas las Ã³rdenes en un rango de fechas (paginado completo)
   async getAllOrdersByDateRange(dateFrom: Date, dateTo: Date, maxOrders = 10000) {
     const allOrders = [];
     let offset = 0;
@@ -459,7 +469,7 @@ class MercadoLibreClient {
     return allOrders;
   }
 
-  // Obtener serie temporal de ventas mensuales (OPTIMIZADO con paralelización)
+  // Obtener serie temporal de ventas mensuales (OPTIMIZADO con paralelizaciÃ³n)
   async getMonthlySalesSeries(months = 12) {
     const now = new Date();
     const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -473,7 +483,7 @@ class MercadoLibreClient {
       monthsToProcess.push({ index: i, targetDate, nextMonth, monthKey });
     }
 
-    // Función para procesar un mes
+    // FunciÃ³n para procesar un mes
     const processMonth = async (monthData: { index: number; targetDate: Date; nextMonth: Date; monthKey: string }) => {
       try {
         const orders = await this.getAllOrdersByDateRange(monthData.targetDate, monthData.nextMonth, 2000);
@@ -532,7 +542,7 @@ class MercadoLibreClient {
 
     for (let i = 0; i < monthsToProcess.length; i += BATCH_SIZE) {
       const batch = monthsToProcess.slice(i, i + BATCH_SIZE);
-      console.log(`📊 Procesando batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(monthsToProcess.length / BATCH_SIZE)} (${batch.map(m => m.monthKey).join(', ')})`);
+      console.log(`ðŸ“Š Procesando batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(monthsToProcess.length / BATCH_SIZE)} (${batch.map(m => m.monthKey).join(', ')})`);
 
       const batchResults = await Promise.all(batch.map(m => processMonth(m)));
       results.push(...batchResults);
@@ -543,15 +553,15 @@ class MercadoLibreClient {
       }
     }
 
-    // Ordenar por fecha (más antiguo primero)
+    // Ordenar por fecha (mÃ¡s antiguo primero)
     results.sort((a, b) => a.index - b.index);
-    results.reverse(); // Más antiguo primero
+    results.reverse(); // MÃ¡s antiguo primero
 
     // Remover el index del resultado final
     return results.map(({ index, ...rest }) => rest);
   }
 
-  // Obtener costos de envío (incluye bonificaciones FLEX)
+  // Obtener costos de envÃ­o (incluye bonificaciones FLEX)
   async getShipmentCosts(shipmentId: number) {
     try {
       return await this.request<{
@@ -600,7 +610,7 @@ class MercadoLibreClient {
     }
   }
 
-  // Obtener detalles del envío incluyendo tipo logístico
+  // Obtener detalles del envÃ­o incluyendo tipo logÃ­stico
   async getShipmentDetails(shipmentId: number) {
     try {
       return await this.request<{
